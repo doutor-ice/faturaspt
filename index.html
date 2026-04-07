@@ -642,35 +642,74 @@ function caeToSuggestion(cae) {
 // ═══════════════════════════════════════════════════════════
 // NIF LOOKUP
 // ═══════════════════════════════════════════════════════════
+
+// Fallback: guess category from company name or activity text when API unavailable
+function guessFromText(text) {
+  if (!text) return null;
+  const t = text.toLowerCase();
+  const fuelWords = ['combustível','combustivel','abastecimento','petrol','galp','bp','repsol','cepsa','prio','gasoil','gasolina','gasóleo','gasoleo','posto'];
+  const foodWords = ['restaurante','café','cafe','snack','pastelaria','padaria','alimentação','alimentacao','supermercado','pingo doce','continente','lidl','aldi','mercadona','intermarché','intermarch','minipreço','minipreco','taberna','churrasqueira','tasca','take away','takeaway','refeição','refeicao','pizz','burguer','burger','mcdonald','kfc','subway','nando'];
+  const lodgeWords = ['hotel','alojamento','hostel','pensão','pensao','pousada','airbnb','apart'];
+  const tollWords = ['portagem','autoestrada','brisa','via verde','lusoponte','ascendi','scutvias','brisal'];
+  const itWords = ['informática','informatica','computador','laptop','tablet','tecnologia','media markt','worten','fnac','apple','samsung','microsoft'];
+  const clothWords = ['fardamento','vestuário','vestuario','roupa','têxtil','textil','uniforme'];
+
+  if (fuelWords.some(w => t.includes(w))) return { category: 'combustivel', desig: 'Combustível' };
+  if (lodgeWords.some(w => t.includes(w))) return { category: 'geral', desig: 'Alojamento' };
+  if (tollWords.some(w => t.includes(w))) return { category: 'geral', desig: 'Portagens' };
+  if (itWords.some(w => t.includes(w))) return { category: 'geral', desig: 'Material Informático' };
+  if (clothWords.some(w => t.includes(w))) return { category: 'geral', desig: 'Fardamento' };
+  if (foodWords.some(w => t.includes(w))) return { category: 'geral', desig: 'Alimentação' };
+  return null;
+}
+
 async function lookupNIF(nif) {
-  // 1. Check cache first
+  // 1. Cache first — fastest path
   if (nifCache[nif]) return { ...nifCache[nif], fromCache: true };
 
-  // 2. Try API
-  const key = apiKey || 'demo';
-  try {
-    const url = `https://www.nif.pt/?json=1&q=${nif}&key=${key}`;
-    const resp = await fetch(url);
-    const data = await resp.json();
-    if (data.result === 'success' && data.records && data.records[nif]) {
-      const r = data.records[nif];
-      const suggestion = caeToSuggestion(r.cae);
-      const entry = {
-        name: r.title || r.alias || '',
-        cae: r.cae || '',
-        activity: r.activity || '',
-        category: suggestion.category,
-        desig: suggestion.desig,
-        userValidated: false
-      };
-      nifCache[nif] = entry;
-      saveNifCache();
-      return { ...entry, fromCache: false };
-    }
-  } catch(e) {}
+  // 2. Try API via HTTPS proxy (nif.pt is HTTP-only, blocked by browsers on HTTPS pages)
+  // We try two proxy approaches for resilience
+  if (apiKey) {
+    const apiUrl = `https://www.nif.pt/?json=1&q=${nif}&key=${apiKey}`;
+    const proxies = [
+      `https://api.allorigins.win/get?url=${encodeURIComponent(apiUrl)}`,
+      `https://corsproxy.io/?${encodeURIComponent(apiUrl)}`,
+    ];
 
-  // 3. Fallback — unknown NIF
-  return null;
+    for (const proxyUrl of proxies) {
+      try {
+        const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(6000) });
+        const outer = await resp.json();
+        // allorigins wraps in {contents:...}, corsproxy returns directly
+        const raw = outer.contents !== undefined ? outer.contents : JSON.stringify(outer);
+        const data = JSON.parse(typeof raw === 'string' ? raw : JSON.stringify(raw));
+
+        if (data.result === 'success' && data.records && data.records[nif]) {
+          const r = data.records[nif];
+          const name = r.title || r.alias || '';
+          const activity = r.activity || '';
+          let suggestion = caeToSuggestion(r.cae);
+          // If CAE gave weak match, try name/activity text as tiebreaker
+          if (suggestion.desig === 'Alimentação') {
+            const textGuess = guessFromText(name) || guessFromText(activity);
+            if (textGuess) suggestion = textGuess;
+          }
+          const entry = {
+            name, cae: r.cae || '', activity,
+            category: suggestion.category, desig: suggestion.desig,
+            userValidated: false
+          };
+          nifCache[nif] = entry;
+          saveNifCache();
+          return { ...entry, fromCache: false };
+        }
+        break; // Got a response but no match — no point trying other proxy
+      } catch(e) { /* try next proxy */ }
+    }
+  }
+
+  // 3. No API key, API failed, or NIF not found — return placeholder
+  return { name: '', cae: '', activity: '', category: 'geral', desig: 'Alimentação', userValidated: false, noApi: !apiKey };
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -787,8 +826,8 @@ function scanLoop() {
   const tick = () => {
     if (!scanning) return;
     frameCount++;
-    // Analyse every 4th frame — good balance of speed vs CPU on mobile
-    if (frameCount % 4 === 0 && video.readyState === video.HAVE_ENOUGH_DATA) {
+  // Analyse every 2nd frame instead of 4th — more responsive on Android
+  if (frameCount % 2 === 0 && video.readyState === video.HAVE_ENOUGH_DATA) {
       const result = decodeFrame(canvas, ctx, video);
       if (result && !scannedSet.has(result)) {
         handleQRDetected(result);
@@ -847,8 +886,13 @@ async function showConfirmPanel(parsed) {
   if (nifInfo) {
     suggestedCat = nifInfo.category;
     suggestedDesig = nifInfo.desig;
-    const source = nifInfo.fromCache ? '⚡ Cache' : '🔍 API';
-    nifBadgeHtml = `<span class="nif-badge ${nifInfo.fromCache ? 'nif-cached' : 'nif-api'}">${source}: ${nifInfo.name || parsed.nifEmissor}</span>`;
+    if (nifInfo.fromCache) {
+      nifBadgeHtml = `<span class="nif-badge nif-cached">⚡ Cache: ${nifInfo.name || parsed.nifEmissor}</span>`;
+    } else if (nifInfo.noApi) {
+      nifBadgeHtml = `<span class="nif-badge nif-unknown">⚠️ Sem key API — verifique a categoria manualmente</span>`;
+    } else {
+      nifBadgeHtml = `<span class="nif-badge nif-api">🔍 API: ${nifInfo.name || parsed.nifEmissor}</span>`;
+    }
   }
 
   document.getElementById('confirmNifBadge').innerHTML = nifBadgeHtml;
