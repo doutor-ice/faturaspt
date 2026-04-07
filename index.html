@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>FaturasPT</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<style>
+  :root {
+    --ink: #1a1a2e;
+    --ink2: #3d3d5c;
+    --muted: #8888aa;
+    --surface: #f5f4f0;
+    --card: #ffffff;
+    --border: #e8e6e0;
+    --accent: #c8602a;
+    --accent2: #e8883a;
+    --green: #2a7a4a;
+    --green-light: #edf7f1;
+    --fuel: #1a4a7a;
+    --fuel-light: #eaf0f8;
+    --shadow: 0 2px 16px rgba(26,26,46,0.08);
+    --shadow-lg: 0 8px 40px rgba(26,26,46,0.14);
+    --radius: 14px;
+    --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--surface);
+    color: var(--ink);
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── HEADER ── */
+  .header {
+    background: var(--ink);
+    color: #fff;
+    padding: 0 20px;
+    position: sticky; top: 0; z-index: 100;
+    box-shadow: 0 2px 20px rgba(0,0,0,0.25);
+  }
+  .header-top {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 0 0;
+  }
+  .logo-mark {
+    width: 38px; height: 38px; background: var(--accent);
+    border-radius: 10px; display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
+  }
+  .logo-text { font-family: 'DM Serif Display', serif; font-size: 20px; letter-spacing: -0.3px; }
+  .logo-sub { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 1px; }
+  .header-badge {
+    margin-left: auto; background: rgba(255,255,255,0.12);
+    padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    color: rgba(255,255,255,0.8);
+  }
+  .tabs {
+    display: flex; gap: 2px; margin-top: 14px;
+  }
+  .tab-btn {
+    padding: 9px 16px; border: none; cursor: pointer; border-radius: 8px 8px 0 0;
+    font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600;
+    transition: all 0.2s; background: transparent; color: rgba(255,255,255,0.55);
+  }
+  .tab-btn.active { background: var(--surface); color: var(--ink); }
+  .tab-btn:not(.active):hover { color: rgba(255,255,255,0.85); }
+
+  /* ── LAYOUT ── */
+  .page { display: none; padding: 20px 16px 80px; max-width: 600px; margin: 0 auto; }
+  .page.active { display: block; }
+
+  /* ── CARDS ── */
+  .card {
+    background: var(--card); border-radius: var(--radius);
+    box-shadow: var(--shadow); overflow: hidden; margin-bottom: 14px;
+  }
+  .card-header {
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .card-header-icon { font-size: 16px; }
+  .card-title { font-size: 14px; font-weight: 700; color: var(--ink); }
+  .card-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .card-body { padding: 16px 18px; }
+
+  /* ── CAMERA ── */
+  .camera-wrap {
+    background: #0d1117; position: relative;
+    min-height: 240px; display: flex; align-items: center; justify-content: center;
+  }
+  #video { width: 100%; max-height: 300px; display: none; object-fit: cover; }
+  .cam-placeholder { text-align: center; color: rgba(255,255,255,0.3); padding: 40px; }
+  .cam-placeholder .icon { font-size: 44px; margin-bottom: 10px; }
+  .cam-placeholder p { font-size: 13px; }
+  .scan-overlay {
+    position: absolute; inset: 0; pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .scan-box {
+    width: 200px; height: 200px; border-radius: 16px;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0.4);
+    border: 2px solid var(--accent2); position: relative;
+  }
+  .scan-box::before, .scan-box::after {
+    content: ''; position: absolute;
+    width: 24px; height: 24px; border-color: var(--accent); border-style: solid;
+  }
+  .scan-box::before { top: -2px; left: -2px; border-width: 3px 0 0 3px; border-radius: 4px 0 0 0; }
+  .scan-box::after { bottom: -2px; right: -2px; border-width: 0 3px 3px 0; border-radius: 0 0 4px 0; }
+  .scan-line {
+    position: absolute; left: 10px; right: 10px; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: scanMove 2s linear infinite;
+    top: 0;
+  }
+  @keyframes scanMove { 0%{top:10px} 100%{top:calc(100% - 10px)} }
+
+  .flash-badge {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    background: var(--green); color: #fff; padding: 6px 20px;
+    border-radius: 20px; font-weight: 700; font-size: 13px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.3); white-space: nowrap;
+    animation: fadeInOut 2s forwards;
+  }
+  @keyframes fadeInOut { 0%{opacity:0;transform:translateX(-50%) translateY(4px)} 15%{opacity:1;transform:translateX(-50%) translateY(0)} 75%{opacity:1} 100%{opacity:0} }
+
+  /* ── BUTTONS ── */
+  .btn {
+    padding: 11px 20px; border: none; border-radius: var(--radius-sm);
+    font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: all 0.18s; display: inline-flex; align-items: center; gap: 7px;
+  }
+  .btn-primary { background: var(--ink); color: #fff; }
+  .btn-primary:hover { background: var(--ink2); }
+  .btn-accent { background: var(--accent); color: #fff; }
+  .btn-accent:hover { background: var(--accent2); }
+  .btn-green { background: var(--green); color: #fff; }
+  .btn-green:hover { filter: brightness(1.1); }
+  .btn-danger { background: #fff0ee; color: #c0392b; }
+  .btn-danger:hover { background: #fde0dc; }
+  .btn-ghost { background: var(--border); color: var(--ink2); }
+  .btn-ghost:hover { background: #ddd; }
+  .btn-fuel { background: var(--fuel); color: #fff; }
+  .btn-fuel:hover { filter: brightness(1.1); }
+  .btn-full { width: 100%; justify-content: center; }
+  .btn-sm { padding: 7px 13px; font-size: 12px; }
+
+  /* ── FORM ELEMENTS ── */
+  input, select, textarea {
+    width: 100%; padding: 10px 12px; border: 1.5px solid var(--border);
+    border-radius: var(--radius-sm); font-family: 'DM Sans', sans-serif;
+    font-size: 14px; color: var(--ink); background: var(--card);
+    transition: border-color 0.2s; outline: none;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  label { font-size: 12px; font-weight: 600; color: var(--muted); display: block; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .field { margin-bottom: 12px; }
+
+  /* ── CONFIRM PANEL ── */
+  .confirm-panel {
+    background: var(--card); border-radius: var(--radius);
+    border: 2px solid var(--green); box-shadow: var(--shadow-lg);
+    overflow: hidden; margin-bottom: 14px;
+    animation: slideUp 0.3s ease;
+  }
+  @keyframes slideUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+  .confirm-header {
+    background: var(--green-light); padding: 14px 18px;
+    border-bottom: 1px solid #c8ead5;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .confirm-header .icon { font-size: 20px; }
+  .confirm-title { font-size: 15px; font-weight: 700; color: var(--green); }
+  .confirm-sub { font-size: 12px; color: #4a9a6a; }
+  .data-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px;
+    margin-bottom: 14px;
+  }
+  .data-item {}
+  .data-label { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  .data-value { font-size: 13px; font-weight: 600; color: var(--ink); margin-top: 2px; }
+  .totals-row {
+    display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1px;
+    background: var(--border); border-radius: var(--radius-sm);
+    overflow: hidden; margin-bottom: 14px;
+  }
+  .total-cell {
+    background: var(--surface); padding: 10px; text-align: center;
+  }
+  .total-cell .lbl { font-size: 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; }
+  .total-cell .val { font-size: 16px; font-weight: 700; margin-top: 2px; }
+  .val-green { color: var(--green); }
+  .val-red { color: #c0392b; }
+  .val-ink { color: var(--ink); }
+
+  /* ── INVOICE LIST ── */
+  .invoice-item {
+    background: var(--card); border-radius: var(--radius);
+    border-left: 4px solid var(--border); box-shadow: var(--shadow);
+    margin-bottom: 10px; overflow: hidden; transition: box-shadow 0.2s;
+  }
+  .invoice-item:hover { box-shadow: var(--shadow-lg); }
+  .invoice-item.cat-geral { border-left-color: var(--accent); }
+  .invoice-item.cat-comb { border-left-color: var(--fuel); }
+  .inv-header { padding: 12px 14px; display: flex; align-items: flex-start; justify-content: space-between; }
+  .inv-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .inv-tag {
+    font-size: 10px; font-weight: 700; padding: 3px 9px; border-radius: 12px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .tag-geral { background: #fff0ea; color: var(--accent); }
+  .tag-comb { background: var(--fuel-light); color: var(--fuel); }
+  .inv-date { font-size: 11px; color: var(--muted); }
+  .inv-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .inv-body { padding: 0 14px 12px; }
+  .inv-desc { font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+  .inv-detail { font-size: 11px; color: var(--muted); }
+  .inv-amount {
+    font-size: 16px; font-weight: 700; color: var(--ink);
+    margin-top: 8px;
+  }
+
+  /* ── SUMMARY CARDS ── */
+  .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .summary-card { background: var(--card); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
+  .summary-card.geral { border-top: 3px solid var(--accent); }
+  .summary-card.comb { border-top: 3px solid var(--fuel); }
+  .sc-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
+  .sc-count { font-size: 28px; font-weight: 700; color: var(--ink); line-height: 1.1; margin-top: 4px; }
+  .sc-total { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* ── EXPORT PAGE ── */
+  .export-card {
+    background: var(--card); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 20px; margin-bottom: 14px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .export-icon {
+    width: 52px; height: 52px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; font-size: 24px; flex-shrink: 0;
+  }
+  .export-icon.geral { background: #fff0ea; }
+  .export-icon.comb { background: var(--fuel-light); }
+  .export-info { flex: 1; }
+  .export-title { font-size: 15px; font-weight: 700; color: var(--ink); }
+  .export-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .export-count { font-size: 12px; font-weight: 600; margin-top: 6px; }
+  .count-geral { color: var(--accent); }
+  .count-comb { color: var(--fuel); }
+
+  /* ── SETTINGS / BACKUP ── */
+  .section-title {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--muted); margin: 20px 0 10px;
+  }
+  .backup-row {
+    background: var(--card); border-radius: var(--radius);
+    padding: 16px 18px; box-shadow: var(--shadow);
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
+  }
+  .backup-info { flex: 1; }
+  .backup-title { font-size: 14px; font-weight: 600; color: var(--ink); }
+  .backup-desc { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* ── ALERT ── */
+  .alert {
+    padding: 12px 14px; border-radius: var(--radius-sm);
+    font-size: 13px; margin-bottom: 12px;
+  }
+  .alert-error { background: #fff0ee; color: #c0392b; border: 1px solid #fcc; }
+  .alert-info { background: var(--fuel-light); color: var(--fuel); border: 1px solid #c0d8f0; }
+  .alert-warn { background: #fffbe6; color: #8a6800; border: 1px solid #ffe58f; }
+
+  /* ── EMPTY STATE ── */
+  .empty { text-align: center; padding: 48px 20px; color: var(--muted); }
+  .empty .icon { font-size: 48px; margin-bottom: 12px; }
+  .empty p { font-size: 14px; }
+  .empty small { font-size: 12px; margin-top: 6px; display: block; }
+
+  /* ── MANUAL INPUT ── */
+  textarea { resize: vertical; min-height: 80px; font-family: monospace; font-size: 12px; }
+
+  /* ── NIF CACHE BADGE ── */
+  .nif-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; padding: 3px 8px; border-radius: 12px; font-weight: 600;
+  }
+  .nif-cached { background: #edf7f1; color: var(--green); }
+  .nif-api { background: #fff0ea; color: var(--accent); }
+  .nif-unknown { background: var(--surface); color: var(--muted); }
+
+  /* ── LOADING SPINNER ── */
+  .spinner {
+    width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .divider { height: 1px; background: var(--border); margin: 14px 0; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+
+  /* ── SETTINGS PAGE ── */
+  .settings-row {
+    background: var(--card); border-radius: var(--radius);
+    padding: 14px 16px; margin-bottom: 10px; box-shadow: var(--shadow);
+  }
+  .settings-label { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+
+  canvas { display: none; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-top">
+    <div class="logo-mark">🧾</div>
+    <div>
+      <div class="logo-text">FaturasPT</div>
+      <div class="logo-sub">Gestão de despesas mensais</div>
+    </div>
+    <div class="header-badge" id="headerBadge">0 faturas</div>
+  </div>
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('scanner')">📷 Scanner</button>
+    <button class="tab-btn" onclick="switchTab('faturas')">📋 Faturas</button>
+    <button class="tab-btn" onclick="switchTab('exportar')">📊 Exportar</button>
+    <button class="tab-btn" onclick="switchTab('definicoes')">⚙️</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ SCANNER ═══════════════════════════ -->
+<div class="page active" id="page-scanner">
+
+  <div class="card">
+    <div class="card-header">
+      <span class="card-header-icon">📷</span>
+      <div>
+        <div class="card-title">Câmara</div>
+        <div class="card-sub">Aponte para o QR code da fatura</div>
+      </div>
+    </div>
+    <div class="camera-wrap" id="cameraWrap">
+      <video id="video" playsinline muted></video>
+      <canvas id="canvas"></canvas>
+      <div class="cam-placeholder" id="camPlaceholder">
+        <div class="icon">📷</div>
+        <p>Câmara inativa</p>
+      </div>
+      <div class="scan-overlay" id="scanOverlay" style="display:none">
+        <div class="scan-box"><div class="scan-line"></div></div>
+      </div>
+      <div class="flash-badge" id="flashBadge" style="display:none">✓ QR lido!</div>
+    </div>
+    <div class="card-body">
+      <div id="camError" class="alert alert-error" style="display:none"></div>
+      <div class="row">
+        <button class="btn btn-primary btn-full" id="btnCamera" onclick="toggleCamera()">▶ Iniciar Câmara</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm panel (shown after scan) -->
+  <div class="confirm-panel" id="confirmPanel" style="display:none">
+    <div class="confirm-header">
+      <span class="icon">✅</span>
+      <div>
+        <div class="confirm-title">Fatura detetada</div>
+        <div class="confirm-sub" id="confirmNifBadge">Confirme e guarde</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="data-grid" id="confirmDataGrid"></div>
+      <div class="totals-row">
+        <div class="total-cell">
+          <div class="lbl">Líquido</div>
+          <div class="val val-ink" id="cfNet">—</div>
+        </div>
+        <div class="total-cell">
+          <div class="lbl">IVA</div>
+          <div class="val val-red" id="cfVat">—</div>
+        </div>
+        <div class="total-cell">
+          <div class="lbl">Total</div>
+          <div class="val val-green" id="cfGross">—</div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Categoria</label>
+        <select id="cfCategory">
+          <option value="geral">Despesas Gerais</option>
+          <option value="combustivel">Combustível</option>
+        </select>
+      </div>
+      <div class="field" id="cfDesigField">
+        <label>Designação</label>
+        <select id="cfDesig" onchange="onDesigChange()">
+          <option>Alimentação</option>
+          <option>Alojamento</option>
+          <option>Deslocação Sócio</option>
+          <option>Oferta Clientes</option>
+          <option>Fardamento</option>
+          <option>Material Informático</option>
+          <option>Material de Escritório</option>
+          <option>Portagens</option>
+          <option value="__outro__">Outro...</option>
+        </select>
+      </div>
+      <div class="field" id="cfOutroField" style="display:none">
+        <label>Descrição livre</label>
+        <input type="text" id="cfOutroText" placeholder="Descreva a despesa...">
+      </div>
+      <div class="row" style="margin-top:6px">
+        <button class="btn btn-ghost" onclick="discardScan()">✕ Descartar</button>
+        <button class="btn btn-green btn-full" onclick="saveScan()">✓ Guardar fatura</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manual input -->
+  <div class="card">
+    <div class="card-header">
+      <span class="card-header-icon">✏️</span>
+      <div>
+        <div class="card-title">Inserir QR manualmente</div>
+        <div class="card-sub">Cole o conteúdo do QR code de qualquer app leitora</div>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="field">
+        <label>Conteúdo do QR code</label>
+        <textarea id="manualQR" placeholder="A:123456789*B:999999990*C:PT*D:FT*..."></textarea>
+      </div>
+      <div id="manualError" class="alert alert-error" style="display:none"></div>
+      <button class="btn btn-accent btn-full" onclick="processManual()">Processar QR</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ FATURAS ═══════════════════════════ -->
+<div class="page" id="page-faturas">
+  <div class="summary-grid">
+    <div class="summary-card geral">
+      <div class="sc-label">Despesas Gerais</div>
+      <div class="sc-count" id="sumGeralCount">0</div>
+      <div class="sc-total" id="sumGeralTotal">0,00 €</div>
+    </div>
+    <div class="summary-card comb">
+      <div class="sc-label">Combustível</div>
+      <div class="sc-count" id="sumCombCount">0</div>
+      <div class="sc-total" id="sumCombTotal">0,00 €</div>
+    </div>
+  </div>
+
+  <div id="invoiceList">
+    <div class="empty">
+      <div class="icon">🧾</div>
+      <p>Sem faturas guardadas</p>
+      <small>Use o scanner para adicionar faturas</small>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════ EXPORTAR ═══════════════════════════ -->
+<div class="page" id="page-exportar">
+
+  <div class="alert alert-info" style="margin-bottom:16px">
+    ℹ️ Os ficheiros Excel são gerados com o formato exacto dos seus templates, com separadores por mês.
+  </div>
+
+  <div class="export-card">
+    <div class="export-icon geral">📁</div>
+    <div class="export-info">
+      <div class="export-title">Despesas Gerais</div>
+      <div class="export-desc">DESPESAS PAGAS POR SÓCIO</div>
+      <div class="export-count count-geral" id="expGeralCount">0 faturas · 0,00 €</div>
+    </div>
+    <button class="btn btn-accent btn-sm" onclick="exportExcel('geral')">⬇ Excel</button>
+  </div>
+
+  <div class="export-card">
+    <div class="export-icon comb">⛽</div>
+    <div class="export-info">
+      <div class="export-title">Combustível</div>
+      <div class="export-desc">DESPESAS VEÍCULO EMPRESA - 07-MH-76</div>
+      <div class="export-count count-comb" id="expCombCount">0 faturas · 0,00 €</div>
+    </div>
+    <button class="btn btn-fuel btn-sm" onclick="exportExcel('combustivel')">⬇ Excel</button>
+  </div>
+
+  <div class="divider"></div>
+  <button class="btn btn-primary btn-full" style="margin-bottom:10px" onclick="exportBoth()">⬇ Exportar ambos</button>
+
+</div>
+
+<!-- ═══════════════════════════ DEFINIÇÕES ═══════════════════════════ -->
+<div class="page" id="page-definicoes">
+
+  <div class="section-title">Chave API</div>
+  <div class="settings-row">
+    <div class="settings-label">Chave nif.pt <span style="font-size:11px;color:var(--muted)">(opcional, melhora a lookup de NIFs)</span></div>
+    <div class="row" style="margin-top:6px">
+      <input type="text" id="nifApiKey" placeholder="Peça a sua key gratuita em nif.pt/contactos/api" oninput="saveApiKey()">
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">Sem key funciona em modo offline com cache local.</div>
+  </div>
+
+  <div class="section-title">Backup & Restauro</div>
+  <div class="backup-row">
+    <div class="backup-info">
+      <div class="backup-title">💾 Exportar backup</div>
+      <div class="backup-desc">Guarda todos os dados (faturas + cache NIFs) num ficheiro JSON</div>
+    </div>
+    <button class="btn btn-ghost btn-sm" onclick="exportBackup()">Exportar</button>
+  </div>
+  <div class="backup-row">
+    <div class="backup-info">
+      <div class="backup-title">📂 Importar backup</div>
+      <div class="backup-desc">Restaura dados de um backup anterior</div>
+    </div>
+    <label class="btn btn-ghost btn-sm" style="cursor:pointer">
+      Importar
+      <input type="file" accept=".json" style="display:none" onchange="importBackup(event)">
+    </label>
+  </div>
+
+  <div class="section-title">Cache de NIFs aprendidos</div>
+  <div class="settings-row">
+    <div id="nifCacheInfo" style="font-size:13px;color:var(--muted)">A carregar...</div>
+    <div style="margin-top:10px">
+      <button class="btn btn-danger btn-sm" onclick="clearNifCache()">🗑 Limpar cache NIFs</button>
+    </div>
+  </div>
+
+  <div class="section-title">Dados do mês</div>
+  <div class="backup-row">
+    <div class="backup-info">
+      <div class="backup-title">🗑 Apagar faturas do mês</div>
+      <div class="backup-desc">Remove todas as faturas guardadas (não afecta a cache de NIFs)</div>
+    </div>
+    <button class="btn btn-danger btn-sm" onclick="clearInvoices()">Apagar</button>
+  </div>
+
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// STATE & STORAGE
+// ═══════════════════════════════════════════════════════════
+const STORAGE_INVOICES = 'faturaspt_invoices';
+const STORAGE_NIF_CACHE = 'faturaspt_nif_cache';
+const STORAGE_API_KEY = 'faturaspt_apikey';
+
+let invoices = JSON.parse(localStorage.getItem(STORAGE_INVOICES) || '[]');
+let nifCache = JSON.parse(localStorage.getItem(STORAGE_NIF_CACHE) || '{}');
+let apiKey = localStorage.getItem(STORAGE_API_KEY) || '';
+
+function saveInvoices() { localStorage.setItem(STORAGE_INVOICES, JSON.stringify(invoices)); }
+function saveNifCache() { localStorage.setItem(STORAGE_NIF_CACHE, JSON.stringify(nifCache)); }
+
+// ═══════════════════════════════════════════════════════════
+// TABS
+// ═══════════════════════════════════════════════════════════
+function switchTab(tab) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('page-' + tab).classList.add('active');
+  event.target.classList.add('active');
+  if (tab === 'faturas') renderInvoiceList();
+  if (tab === 'exportar') renderExportPage();
+  if (tab === 'definicoes') renderSettings();
+}
+
+// ═══════════════════════════════════════════════════════════
+// QR PARSE
+// ═══════════════════════════════════════════════════════════
+const DOC_TYPES = {
+  FT:'Fatura', FS:'Fatura Simplificada', FR:'Fatura-Recibo',
+  ND:'Nota de Débito', NC:'Nota de Crédito', VD:'Venda a Dinheiro',
+  TV:'Talão de Venda', TD:'Talão de Devolução', RP:'Recibo'
+};
+
+function parseATQR(raw) {
+  try {
+    const fields = {};
+    raw.split('*').forEach(pair => {
+      const idx = pair.indexOf(':');
+      if (idx > -1) fields[pair.slice(0, idx)] = pair.slice(idx + 1);
+    });
+    if (!fields.A) return null;
+    const vatTotal = parseFloat(fields.N) || 0;
+    const gross = parseFloat(fields.O) || 0;
+    const net = gross - vatTotal;
+    let dateStr = '', day = '', month = '', year = '';
+    if (fields.F && fields.F.length === 8) {
+      year = fields.F.slice(0, 4);
+      month = fields.F.slice(4, 6);
+      day = fields.F.slice(6, 8);
+      dateStr = `${day}/${month}/${year}`;
+    }
+    return {
+      nifEmissor: fields.A || '',
+      nifAdquirente: fields.B || '',
+      tipoDoc: DOC_TYPES[fields.D] || fields.D || '',
+      codDoc: fields.D || '',
+      estado: fields.E || '',
+      data: dateStr, day: parseInt(day), month: parseInt(month), year: parseInt(year),
+      numDoc: fields.G || '',
+      atcud: fields.H || '',
+      ivaTotal: vatTotal, totalBruto: gross, totalLiquido: net,
+      rawQR: raw
+    };
+  } catch { return null; }
+}
+
+// ═══════════════════════════════════════════════════════════
+// CAE → CATEGORY / DESIGNAÇÃO
+// ═══════════════════════════════════════════════════════════
+function caeToSuggestion(cae) {
+  if (!cae) return { category: 'geral', desig: 'Alimentação' };
+  const c = parseInt(cae);
+  if ((c >= 47300 && c <= 47399) || c === 47300) return { category: 'combustivel', desig: 'Combustível' };
+  if ((c >= 56100 && c <= 56299) || (c >= 55100 && c <= 55209)) return { category: 'geral', desig: 'Alimentação' };
+  if (c >= 55100 && c <= 55909) return { category: 'geral', desig: 'Alojamento' };
+  if (c === 52211 || c === 52212 || c === 52213) return { category: 'geral', desig: 'Portagens' };
+  if (c >= 47400 && c <= 47499) return { category: 'geral', desig: 'Material Informático' };
+  if (c >= 47510 && c <= 47990) return { category: 'geral', desig: 'Material de Escritório' };
+  if (c >= 14100 && c <= 14399) return { category: 'geral', desig: 'Fardamento' };
+  if (c >= 49100 && c <= 53209) return { category: 'geral', desig: 'Deslocação Sócio' };
+  return { category: 'geral', desig: 'Alimentação' };
+}
+
+// ═══════════════════════════════════════════════════════════
+// NIF LOOKUP
+// ═══════════════════════════════════════════════════════════
+async function lookupNIF(nif) {
+  // 1. Check cache first
+  if (nifCache[nif]) return { ...nifCache[nif], fromCache: true };
+
+  // 2. Try API
+  const key = apiKey || 'demo';
+  try {
+    const url = `https://www.nif.pt/?json=1&q=${nif}&key=${key}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.result === 'success' && data.records && data.records[nif]) {
+      const r = data.records[nif];
+      const suggestion = caeToSuggestion(r.cae);
+      const entry = {
+        name: r.title || r.alias || '',
+        cae: r.cae || '',
+        activity: r.activity || '',
+        category: suggestion.category,
+        desig: suggestion.desig,
+        userValidated: false
+      };
+      nifCache[nif] = entry;
+      saveNifCache();
+      return { ...entry, fromCache: false };
+    }
+  } catch(e) {}
+
+  // 3. Fallback — unknown NIF
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════
+// CAMERA
+// ═══════════════════════════════════════════════════════════
+let stream = null, scanning = false, raf = null;
+const scannedSet = new Set();
+let pendingScan = null;
+
+function toggleCamera() {
+  if (scanning) stopCamera();
+  else startCamera();
+}
+
+async function startCamera() {
+  document.getElementById('camError').style.display = 'none';
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+    const video = document.getElementById('video');
+    video.srcObject = stream;
+    await video.play();
+    video.style.display = 'block';
+    document.getElementById('camPlaceholder').style.display = 'none';
+    document.getElementById('scanOverlay').style.display = 'flex';
+    document.getElementById('btnCamera').innerHTML = '■ Parar câmara';
+    document.getElementById('btnCamera').className = 'btn btn-danger btn-full';
+    scanning = true;
+    scanLoop();
+  } catch(e) {
+    const el = document.getElementById('camError');
+    el.textContent = 'Não foi possível aceder à câmara: ' + e.message;
+    el.style.display = 'block';
+  }
+}
+
+function stopCamera() {
+  if (raf) cancelAnimationFrame(raf);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null; scanning = false;
+  const video = document.getElementById('video');
+  video.style.display = 'none';
+  video.srcObject = null;
+  document.getElementById('camPlaceholder').style.display = 'block';
+  document.getElementById('scanOverlay').style.display = 'none';
+  document.getElementById('btnCamera').innerHTML = '▶ Iniciar câmara';
+  document.getElementById('btnCamera').className = 'btn btn-primary btn-full';
+}
+
+function scanLoop() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  if (!video || !canvas || !window.jsQR) return;
+  const ctx = canvas.getContext('2d');
+  const tick = () => {
+    if (!scanning) return;
+    if (video.readyState === video.HAVE_ENOUGH_DATA) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0);
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = window.jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+      if (code && code.data && !scannedSet.has(code.data)) {
+        handleQRDetected(code.data);
+      }
+    }
+    raf = requestAnimationFrame(tick);
+  };
+  raf = requestAnimationFrame(tick);
+}
+
+async function handleQRDetected(raw) {
+  const parsed = parseATQR(raw);
+  if (!parsed) return;
+  scannedSet.add(raw);
+
+  // Flash
+  const flash = document.getElementById('flashBadge');
+  flash.style.display = 'block';
+  setTimeout(() => { flash.style.display = 'none'; }, 2000);
+
+  await showConfirmPanel(parsed);
+}
+
+async function showConfirmPanel(parsed) {
+  pendingScan = parsed;
+
+  // NIF lookup
+  const nifInfo = await lookupNIF(parsed.nifEmissor);
+
+  // Suggest category / desig
+  let suggestedCat = 'geral', suggestedDesig = 'Alimentação';
+  let nifBadgeHtml = `<span class="nif-badge nif-unknown">NIF: ${parsed.nifEmissor}</span>`;
+
+  if (nifInfo) {
+    suggestedCat = nifInfo.category;
+    suggestedDesig = nifInfo.desig;
+    const source = nifInfo.fromCache ? '⚡ Cache' : '🔍 API';
+    nifBadgeHtml = `<span class="nif-badge ${nifInfo.fromCache ? 'nif-cached' : 'nif-api'}">${source}: ${nifInfo.name || parsed.nifEmissor}</span>`;
+  }
+
+  document.getElementById('confirmNifBadge').innerHTML = nifBadgeHtml;
+
+  // Data grid
+  const grid = document.getElementById('confirmDataGrid');
+  const items = [
+    ['Data', parsed.data || '—'],
+    ['Nº Documento', parsed.numDoc || '—'],
+    ['Tipo', parsed.tipoDoc || '—'],
+    ['NIF Emissor', parsed.nifEmissor || '—'],
+    ['ATCUD', (parsed.atcud || '—').slice(0, 20)],
+    ['Estado', parsed.estado === 'N' ? '✓ Normal' : parsed.estado],
+  ];
+  grid.innerHTML = items.map(([k,v]) => `
+    <div class="data-item">
+      <div class="data-label">${k}</div>
+      <div class="data-value">${v}</div>
+    </div>`).join('');
+
+  document.getElementById('cfNet').textContent = fmt(parsed.totalLiquido) + ' €';
+  document.getElementById('cfVat').textContent = fmt(parsed.ivaTotal) + ' €';
+  document.getElementById('cfGross').textContent = fmt(parsed.totalBruto) + ' €';
+
+  // Set category
+  document.getElementById('cfCategory').value = suggestedCat;
+  onCategoryChange(suggestedCat);
+
+  // Set desig
+  const desigSel = document.getElementById('cfDesig');
+  let found = false;
+  for (let opt of desigSel.options) {
+    if (opt.value === suggestedDesig || opt.text === suggestedDesig) {
+      desigSel.value = opt.value; found = true; break;
+    }
+  }
+  if (!found) desigSel.value = desigSel.options[0].value;
+  onDesigChange();
+
+  // If combustivel, hide desig field
+  if (suggestedCat === 'combustivel') {
+    document.getElementById('cfDesigField').style.display = 'none';
+  } else {
+    document.getElementById('cfDesigField').style.display = 'block';
+  }
+
+  document.getElementById('confirmPanel').style.display = 'block';
+  document.getElementById('cfCategory').onchange = function() { onCategoryChange(this.value); };
+}
+
+function onCategoryChange(cat) {
+  const isComb = (cat || document.getElementById('cfCategory').value) === 'combustivel';
+  document.getElementById('cfDesigField').style.display = isComb ? 'none' : 'block';
+}
+
+function onDesigChange() {
+  const val = document.getElementById('cfDesig').value;
+  document.getElementById('cfOutroField').style.display = val === '__outro__' ? 'block' : 'none';
+}
+
+function discardScan() {
+  if (pendingScan) scannedSet.delete(pendingScan.rawQR);
+  pendingScan = null;
+  document.getElementById('confirmPanel').style.display = 'none';
+}
+
+function saveScan() {
+  if (!pendingScan) return;
+  const cat = document.getElementById('cfCategory').value;
+  let desig = 'Combustível';
+  if (cat !== 'combustivel') {
+    const sel = document.getElementById('cfDesig');
+    desig = sel.value === '__outro__'
+      ? document.getElementById('cfOutroText').value.trim() || 'Outro'
+      : sel.options[sel.selectedIndex].text;
+  }
+
+  const inv = {
+    ...pendingScan,
+    category: cat,
+    desig,
+    id: Date.now() + Math.random()
+  };
+  invoices.push(inv);
+  saveInvoices();
+
+  // Update nif cache with user's choice (mark as validated)
+  const nif = pendingScan.nifEmissor;
+  if (nifCache[nif]) {
+    nifCache[nif].category = cat;
+    nifCache[nif].desig = desig;
+    nifCache[nif].userValidated = true;
+  } else {
+    nifCache[nif] = { name: '', cae: '', category: cat, desig, userValidated: true };
+  }
+  saveNifCache();
+
+  pendingScan = null;
+  document.getElementById('confirmPanel').style.display = 'none';
+  document.getElementById('cfOutroText').value = '';
+  updateHeaderBadge();
+
+  // Brief success flash
+  const flash = document.getElementById('flashBadge');
+  flash.textContent = '✓ Fatura guardada!';
+  flash.style.display = 'block';
+  setTimeout(() => { flash.style.display = 'none'; flash.textContent = '✓ QR lido!'; }, 2000);
+}
+
+// ═══════════════════════════════════════════════════════════
+// MANUAL QR
+// ═══════════════════════════════════════════════════════════
+async function processManual() {
+  const raw = document.getElementById('manualQR').value.trim();
+  const errEl = document.getElementById('manualError');
+  errEl.style.display = 'none';
+  if (!raw) { errEl.textContent = 'Cole o conteúdo do QR code.'; errEl.style.display = 'block'; return; }
+  const parsed = parseATQR(raw);
+  if (!parsed) { errEl.textContent = 'QR inválido ou não é uma fatura AT portuguesa.'; errEl.style.display = 'block'; return; }
+  if (scannedSet.has(raw)) { errEl.textContent = 'Este QR code já foi processado.'; errEl.style.display = 'block'; return; }
+  scannedSet.add(raw);
+  document.getElementById('manualQR').value = '';
+  await showConfirmPanel(parsed);
+}
+
+// ═══════════════════════════════════════════════════════════
+// INVOICE LIST RENDER
+// ═══════════════════════════════════════════════════════════
+function renderInvoiceList() {
+  const list = document.getElementById('invoiceList');
+  const geralInvs = invoices.filter(i => i.category === 'geral');
+  const combInvs = invoices.filter(i => i.category === 'combustivel');
+
+  document.getElementById('sumGeralCount').textContent = geralInvs.length;
+  document.getElementById('sumGeralTotal').textContent = fmt(geralInvs.reduce((s,i) => s + i.totalBruto, 0)) + ' €';
+  document.getElementById('sumCombCount').textContent = combInvs.length;
+  document.getElementById('sumCombTotal').textContent = fmt(combInvs.reduce((s,i) => s + i.totalBruto, 0)) + ' €';
+
+  if (!invoices.length) {
+    list.innerHTML = `<div class="empty"><div class="icon">🧾</div><p>Sem faturas guardadas</p><small>Use o scanner para adicionar faturas</small></div>`;
+    return;
+  }
+
+  // Sort by date desc
+  const sorted = [...invoices].sort((a,b) => {
+    const da = a.year*10000 + a.month*100 + a.day;
+    const db = b.year*10000 + b.month*100 + b.day;
+    return db - da;
+  });
+
+  list.innerHTML = sorted.map(inv => {
+    const isComb = inv.category === 'combustivel';
+    const nifInfo = nifCache[inv.nifEmissor];
+    const emitter = nifInfo && nifInfo.name ? nifInfo.name : inv.nifEmissor;
+    return `
+    <div class="invoice-item ${isComb ? 'cat-comb' : 'cat-geral'}" data-id="${inv.id}">
+      <div class="inv-header">
+        <div class="inv-meta">
+          <span class="inv-tag ${isComb ? 'tag-comb' : 'tag-geral'}">${isComb ? 'Combustível' : 'Geral'}</span>
+          <span class="inv-date">${inv.data || '—'}</span>
+        </div>
+        <div class="inv-actions">
+          <button class="btn btn-danger btn-sm" onclick="removeInvoice('${inv.id}')">✕</button>
+        </div>
+      </div>
+      <div class="inv-body">
+        <div class="inv-desc">${inv.desig || '—'}</div>
+        <div class="inv-detail">${emitter} · ${inv.numDoc || '—'}</div>
+        <div class="inv-amount">${fmt(inv.totalBruto)} € <span style="font-size:12px;font-weight:400;color:var(--muted)">(IVA: ${fmt(inv.ivaTotal)} €)</span></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function removeInvoice(id) {
+  if (!confirm('Remover esta fatura?')) return;
+  invoices = invoices.filter(i => String(i.id) !== String(id));
+  saveInvoices();
+  renderInvoiceList();
+  updateHeaderBadge();
+}
+
+// ═══════════════════════════════════════════════════════════
+// EXPORT PAGE
+// ═══════════════════════════════════════════════════════════
+function renderExportPage() {
+  const geral = invoices.filter(i => i.category === 'geral');
+  const comb = invoices.filter(i => i.category === 'combustivel');
+  document.getElementById('expGeralCount').textContent =
+    `${geral.length} fatura${geral.length !== 1 ? 's' : ''} · ${fmt(geral.reduce((s,i)=>s+i.totalBruto,0))} €`;
+  document.getElementById('expCombCount').textContent =
+    `${comb.length} fatura${comb.length !== 1 ? 's' : ''} · ${fmt(comb.reduce((s,i)=>s+i.totalBruto,0))} €`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// EXCEL EXPORT
+// ═══════════════════════════════════════════════════════════
+const MONTHS = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho',
+  'Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+function buildWorkbook(category) {
+  const XLSX = window.XLSX;
+  const wb = XLSX.utils.book_new();
+  const isGeral = category === 'geral';
+  const title = isGeral ? 'DESPESAS PAGAS POR SÓCIO' : 'DESPESAS VEÍCULO EMPRESA - 07-MH-76';
+  const filtered = invoices.filter(i => i.category === category);
+
+  // Group by month (1-12)
+  const byMonth = {};
+  for (let m = 1; m <= 12; m++) byMonth[m] = filtered.filter(i => i.month === m);
+
+  // Detect year (use current year as fallback)
+  const years = filtered.map(i => i.year).filter(Boolean);
+  const year = years.length ? Math.max(...years) : new Date().getFullYear();
+
+  MONTHS.forEach((monthName, mi) => {
+    const monthNum = mi + 1;
+    const rows = byMonth[monthNum] || [];
+    const ws = {};
+
+    // ── Styling helpers ──
+    const bold = { font: { bold: true, name: 'Arial', sz: 11 } };
+    const boldCenter = { font: { bold: true, name: 'Arial', sz: 11 }, alignment: { horizontal: 'center' } };
+    const normal = { font: { name: 'Arial', sz: 10 } };
+    const rightAlign = { font: { name: 'Arial', sz: 10 }, alignment: { horizontal: 'right' } };
+    const headerFill = { font: { bold: true, name: 'Arial', sz: 10 }, fill: { fgColor: { rgb: 'D9D9D9' }, patternType: 'solid' }, border: { bottom: { style: 'thin' } } };
+    const totalStyle = { font: { bold: true, name: 'Arial', sz: 10 }, alignment: { horizontal: 'right' } };
+
+    const setCell = (addr, v, s) => {
+      ws[addr] = { v, t: typeof v === 'number' ? 'n' : 's', s: s || normal };
+      if (typeof v === 'number') ws[addr].z = '#,##0.00';
+    };
+    const setFormula = (addr, f, s) => {
+      ws[addr] = { f, t: 'n', s: s || normal, z: '#,##0.00' };
+    };
+
+    // Row 3: title
+    setCell('B3', title, { font: { bold: true, name: 'Arial', sz: 14 } });
+    // Row 4: FOLHA
+    setCell('F4', 'FOLHA N.º _____', rightAlign);
+    // Row 6: ANO / MÊS
+    setCell('B6', 'ANO:', bold);
+    setCell('C6', year, { font: { bold: true, name: 'Arial', sz: 11 }, alignment: { horizontal: 'left' } });
+    setCell('D6', 'MÊS:', bold);
+    setCell('E6', monthName, bold);
+    // Row 8: transporte
+    setCell('D8', 'Transporte folha n.º ____', normal);
+    setCell('F8', '___.____.____ €', rightAlign);
+    // Row 10-11: headers
+    setCell('B10', 'DIA', headerFill);
+    setCell('C10', 'DESIGNAÇÃO', headerFill);
+    setCell('D10', 'DOC.', headerFill);
+    setCell('E10', 'VALOR', { ...headerFill, alignment: { horizontal: 'right' } });
+    setCell('F10', 'RÚBRICA /', headerFill);
+    setCell('F11', 'ASSINATURA', headerFill);
+
+    // Rows 12..42 — data (up to 31 rows)
+    const dataStart = 12, dataEnd = 42;
+    for (let r = dataStart; r <= dataEnd; r++) {
+      const inv = rows[r - dataStart];
+      if (inv) {
+        setCell(`B${r}`, inv.day || '', normal);
+        setCell(`C${r}`, inv.desig || '', normal);
+        setCell(`D${r}`, inv.numDoc || '', normal);
+        setCell(`E${r}`, inv.totalBruto, rightAlign);
+      } else {
+        // empty rows
+        ['B','C','D','E','F'].forEach(col => {
+          ws[`${col}${r}`] = { v: '', t: 's', s: normal };
+        });
+      }
+    }
+
+    // Row 43: TOTAIS
+    setCell('C43', 'TOTAIS :', totalStyle);
+    setFormula('E43', `SUM(E${dataStart}:E${dataEnd})`, { ...totalStyle, font: { bold: true, name: 'Arial', sz: 11 }, border: { top: { style: 'thin' }, bottom: { style: 'double' } } });
+    // Row 44: A Transportar
+    setCell('C44', 'A Transportar :', totalStyle);
+
+    // Column widths
+    ws['!cols'] = [
+      { wch: 2 },   // A
+      { wch: 6 },   // B DIA
+      { wch: 32 },  // C DESIGNAÇÃO
+      { wch: 20 },  // D DOC
+      { wch: 12 },  // E VALOR
+      { wch: 14 },  // F RÚBRICA
+    ];
+
+    // Merge cells
+    ws['!merges'] = [
+      { s:{r:2,c:1}, e:{r:2,c:5} }, // title row 3
+    ];
+
+    ws['!ref'] = `A1:F44`;
+
+    XLSX.utils.book_append_sheet(wb, ws, monthName);
+  });
+
+  return wb;
+}
+
+function exportExcel(category) {
+  if (!window.XLSX) { alert('Biblioteca Excel ainda a carregar...'); return; }
+  const filtered = invoices.filter(i => i.category === category);
+  if (!filtered.length) { alert('Sem faturas nesta categoria para exportar.'); return; }
+  const wb = buildWorkbook(category);
+  const filename = category === 'geral' ? 'Despesas_Gerais.xlsx' : 'Despesas_Combustivel.xlsx';
+  window.XLSX.writeFile(wb, filename);
+}
+
+function exportBoth() {
+  if (!window.XLSX) { alert('Biblioteca Excel ainda a carregar...'); return; }
+  if (!invoices.length) { alert('Sem faturas para exportar.'); return; }
+  ['geral','combustivel'].forEach(cat => {
+    if (invoices.filter(i => i.category === cat).length) exportExcel(cat);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS
+// ═══════════════════════════════════════════════════════════
+function renderSettings() {
+  document.getElementById('nifApiKey').value = apiKey;
+  const count = Object.keys(nifCache).length;
+  const validated = Object.values(nifCache).filter(v => v.userValidated).length;
+  document.getElementById('nifCacheInfo').innerHTML =
+    `<strong>${count}</strong> NIFs em cache · <strong>${validated}</strong> validados por si<br><br>` +
+    Object.entries(nifCache).slice(0, 8).map(([nif, d]) =>
+      `<span style="font-size:11px;display:block;margin-bottom:3px">
+        ${nif} — ${d.name || '(sem nome)'} <span style="color:var(--accent)">${d.desig}</span>
+        ${d.userValidated ? '✓' : ''}
+      </span>`
+    ).join('') +
+    (count > 8 ? `<span style="font-size:11px;color:var(--muted)">...e mais ${count-8}</span>` : '');
+}
+
+function saveApiKey() {
+  apiKey = document.getElementById('nifApiKey').value.trim();
+  localStorage.setItem(STORAGE_API_KEY, apiKey);
+}
+
+function clearNifCache() {
+  if (!confirm('Limpar toda a cache de NIFs aprendidos?')) return;
+  nifCache = {};
+  saveNifCache();
+  renderSettings();
+}
+
+function clearInvoices() {
+  if (!confirm('Apagar todas as faturas do mês? (a cache de NIFs é mantida)')) return;
+  invoices = [];
+  saveInvoices();
+  updateHeaderBadge();
+  renderSettings();
+}
+
+// ═══════════════════════════════════════════════════════════
+// BACKUP
+// ═══════════════════════════════════════════════════════════
+function exportBackup() {
+  const data = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    invoices,
+    nifCache
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const date = new Date().toISOString().slice(0,10);
+  a.href = url; a.download = `faturaspt_backup_${date}.json`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importBackup(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data.version || !data.invoices) throw new Error('Formato inválido');
+      if (!confirm(`Importar ${data.invoices.length} faturas e ${Object.keys(data.nifCache||{}).length} NIFs em cache?\n\nIsto irá SUBSTITUIR os dados actuais.`)) return;
+      invoices = data.invoices || [];
+      nifCache = data.nifCache || {};
+      saveInvoices(); saveNifCache();
+      updateHeaderBadge();
+      renderSettings();
+      alert('Backup importado com sucesso!');
+    } catch(err) {
+      alert('Erro ao importar: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+// ═══════════════════════════════════════════════════════════
+// UTILS
+// ═══════════════════════════════════════════════════════════
+function fmt(n) {
+  return (n || 0).toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function updateHeaderBadge() {
+  document.getElementById('headerBadge').textContent = `${invoices.length} fatura${invoices.length !== 1 ? 's' : ''}`;
+}
+
+// ── INIT ──
+updateHeaderBadge();
+</script>
+</body>
+</html>
