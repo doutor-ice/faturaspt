@@ -6,7 +6,7 @@
 <title>FaturasPT</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
 <style>
   :root {
     --ink: #1a1a2e;
@@ -676,7 +676,7 @@ async function lookupNIF(nif) {
 // ═══════════════════════════════════════════════════════════
 // CAMERA
 // ═══════════════════════════════════════════════════════════
-let stream = null, scanning = false, raf = null;
+let codeReader = null, scanning = false;
 const scannedSet = new Set();
 let pendingScan = null;
 
@@ -686,20 +686,33 @@ function toggleCamera() {
 }
 
 async function startCamera() {
-  document.getElementById('camError').style.display = 'none';
+  const errEl = document.getElementById('camError');
+  errEl.style.display = 'none';
+
+  // Wait for ZXing to load
+  if (!window.ZXing) {
+    errEl.textContent = 'Biblioteca de leitura ainda a carregar, tente novamente.';
+    errEl.style.display = 'block';
+    return;
+  }
+
   try {
-    // Request highest possible resolution for thermal paper QR codes
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: 'environment',
-        width: { ideal: 1920, min: 1280 },
-        height: { ideal: 1080, min: 720 },
-        focusMode: 'continuous'
-      }
-    });
+    codeReader = new ZXing.BrowserQRCodeReader();
+
+    // Get list of cameras and prefer back camera
+    const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
+    let deviceId = undefined;
+    if (devices.length > 1) {
+      // Prefer back camera
+      const back = devices.find(d =>
+        /back|rear|environment/i.test(d.label) || devices.indexOf(d) === devices.length - 1
+      );
+      if (back) deviceId = back.deviceId;
+    } else if (devices.length === 1) {
+      deviceId = devices[0].deviceId;
+    }
+
     const video = document.getElementById('video');
-    video.srcObject = stream;
-    await video.play();
     video.style.display = 'block';
     document.getElementById('camPlaceholder').style.display = 'none';
     document.getElementById('scanOverlay').style.display = 'flex';
@@ -707,18 +720,28 @@ async function startCamera() {
     document.getElementById('btnCamera').className = 'btn btn-danger btn-full';
     document.getElementById('btnCapture').style.display = 'block';
     scanning = true;
-    scanLoop();
+
+    // ZXing handles the camera stream internally
+    await codeReader.decodeFromVideoDevice(deviceId, 'video', (result, err) => {
+      if (result && !scannedSet.has(result.getText())) {
+        handleQRDetected(result.getText());
+      }
+      // Ignore errors — ZXing throws continuously when no QR visible
+    });
+
   } catch(e) {
-    const el = document.getElementById('camError');
-    el.textContent = 'Não foi possível aceder à câmara: ' + e.message;
-    el.style.display = 'block';
+    scanning = false;
+    errEl.textContent = 'Não foi possível aceder à câmara: ' + e.message;
+    errEl.style.display = 'block';
   }
 }
 
 function stopCamera() {
-  if (raf) cancelAnimationFrame(raf);
-  if (stream) stream.getTracks().forEach(t => t.stop());
-  stream = null; scanning = false;
+  if (codeReader) {
+    codeReader.reset();
+    codeReader = null;
+  }
+  scanning = false;
   const video = document.getElementById('video');
   video.style.display = 'none';
   video.srcObject = null;
@@ -729,93 +752,36 @@ function stopCamera() {
   document.getElementById('btnCapture').style.display = 'none';
 }
 
-// Preprocess image data to improve contrast for thermal paper
-function preprocessImageData(ctx, width, height) {
-  const imageData = ctx.getImageData(0, 0, width, height);
-  const data = imageData.data;
+// Manual capture: grab current video frame and decode from image
+async function capturePhoto() {
+  if (!scanning || !window.ZXing) return;
 
-  // Convert to grayscale + increase contrast (helps thermal paper)
-  for (let i = 0; i < data.length; i += 4) {
-    // Grayscale
-    const gray = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
-    // Increase contrast: stretch histogram
-    const contrast = 1.8;
-    const factor = (259 * (contrast * 255 + 255)) / (255 * (259 - contrast * 255));
-    const adjusted = Math.min(255, Math.max(0, factor * (gray - 128) + 128));
-    data[i] = data[i+1] = data[i+2] = adjusted;
-  }
-  ctx.putImageData(imageData, 0, 0);
-  return ctx.getImageData(0, 0, width, height);
-}
-
-function tryDecodeQR(imageData) {
-  if (!window.jsQR) return null;
-  // Try all inversion modes — critical for thermal paper (faded/inverted)
-  const modes = ['dontInvert', 'onlyInvert', 'attemptBoth'];
-  for (const mode of modes) {
-    const result = window.jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: mode });
-    if (result && result.data) return result;
-  }
-  return null;
-}
-
-function scanLoop() {
   const video = document.getElementById('video');
   const canvas = document.getElementById('canvas');
-  if (!video || !canvas) return;
-  const ctx = canvas.getContext('2d');
-
-  // Throttle: only analyse every 3 frames to save CPU
-  let frameCount = 0;
-
-  const tick = () => {
-    if (!scanning) return;
-    frameCount++;
-    if (video.readyState === video.HAVE_ENOUGH_DATA && frameCount % 3 === 0) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0);
-      const processed = preprocessImageData(ctx, canvas.width, canvas.height);
-      const code = tryDecodeQR(processed);
-      if (code && code.data && !scannedSet.has(code.data)) {
-        handleQRDetected(code.data);
-      }
-    }
-    raf = requestAnimationFrame(tick);
-  };
-  raf = requestAnimationFrame(tick);
-}
-
-// Manual photo capture — freeze frame and try harder to decode
-function capturePhoto() {
-  const video = document.getElementById('video');
-  const canvas = document.getElementById('canvas');
-  if (!video || !scanning) return;
-
   const ctx = canvas.getContext('2d');
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   ctx.drawImage(video, 0, 0);
 
-  // Try 1: normal with preprocessing
-  const processed = preprocessImageData(ctx, canvas.width, canvas.height);
-  let code = tryDecodeQR(processed);
-
-  // Try 2: also try original without preprocessing
-  if (!code) {
-    ctx.drawImage(video, 0, 0);
-    const original = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    code = tryDecodeQR(original);
+  try {
+    const imageReader = new ZXing.BrowserQRCodeReader();
+    const dataUrl = canvas.toDataURL('image/png');
+    const result = await imageReader.decodeFromImageUrl(dataUrl);
+    if (result && result.getText() && !scannedSet.has(result.getText())) {
+      handleQRDetected(result.getText());
+    } else {
+      showCamError('QR code não detectado na imagem. Tente ajustar a posição ou iluminação.');
+    }
+  } catch(e) {
+    showCamError('QR code não detectado. Tente aproximar a câmara e garantir boa iluminação.');
   }
+}
 
-  if (code && code.data && !scannedSet.has(code.data)) {
-    handleQRDetected(code.data);
-  } else {
-    const el = document.getElementById('camError');
-    el.textContent = 'QR code não detectado. Tente aproximar mais a câmara ou melhorar a iluminação.';
-    el.style.display = 'block';
-    setTimeout(() => { el.style.display = 'none'; }, 3000);
-  }
+function showCamError(msg) {
+  const el = document.getElementById('camError');
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 4000);
 }
 
 async function handleQRDetected(raw) {
