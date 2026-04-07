@@ -6,7 +6,7 @@
 <title>FaturasPT</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root {
     --ink: #1a1a2e;
@@ -674,11 +674,30 @@ async function lookupNIF(nif) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// CAMERA
+// CAMERA — uses native MediaDevices + jsQR (loaded below)
 // ═══════════════════════════════════════════════════════════
-let codeReader = null, scanning = false;
+let mediaStream = null, scanning = false, rafId = null;
 const scannedSet = new Set();
 let pendingScan = null;
+
+// Load jsQR dynamically — simple, battle-tested, no namespace issues
+function loadJsQR() {
+  return new Promise((resolve, reject) => {
+    if (window.jsQR) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+    s.onload = resolve;
+    s.onerror = () => {
+      // fallback CDN
+      const s2 = document.createElement('script');
+      s2.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
+      s2.onload = resolve;
+      s2.onerror = reject;
+      document.head.appendChild(s2);
+    };
+    document.head.appendChild(s);
+  });
+}
 
 function toggleCamera() {
   if (scanning) stopCamera();
@@ -689,30 +708,29 @@ async function startCamera() {
   const errEl = document.getElementById('camError');
   errEl.style.display = 'none';
 
-  // Wait for ZXing to load
-  if (!window.ZXing) {
-    errEl.textContent = 'Biblioteca de leitura ainda a carregar, tente novamente.';
+  try {
+    await loadJsQR();
+  } catch(e) {
+    errEl.textContent = 'Não foi possível carregar a biblioteca de leitura. Verifique a ligação à internet.';
     errEl.style.display = 'block';
     return;
   }
 
   try {
-    codeReader = new ZXing.BrowserQRCodeReader();
-
-    // Get list of cameras and prefer back camera
-    const devices = await ZXing.BrowserCodeReader.listVideoInputDevices();
-    let deviceId = undefined;
-    if (devices.length > 1) {
-      // Prefer back camera
-      const back = devices.find(d =>
-        /back|rear|environment/i.test(d.label) || devices.indexOf(d) === devices.length - 1
-      );
-      if (back) deviceId = back.deviceId;
-    } else if (devices.length === 1) {
-      deviceId = devices[0].deviceId;
-    }
+    // Use facingMode:environment — simplest and most reliable on Android
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      }
+    });
 
     const video = document.getElementById('video');
+    video.srcObject = mediaStream;
+    video.setAttribute('playsinline', true);
+    await video.play();
+
     video.style.display = 'block';
     document.getElementById('camPlaceholder').style.display = 'none';
     document.getElementById('scanOverlay').style.display = 'flex';
@@ -721,30 +739,21 @@ async function startCamera() {
     document.getElementById('btnCapture').style.display = 'block';
     scanning = true;
 
-    // ZXing handles the camera stream internally
-    await codeReader.decodeFromVideoDevice(deviceId, 'video', (result, err) => {
-      if (result && !scannedSet.has(result.getText())) {
-        handleQRDetected(result.getText());
-      }
-      // Ignore errors — ZXing throws continuously when no QR visible
-    });
+    scanLoop();
 
   } catch(e) {
-    scanning = false;
     errEl.textContent = 'Não foi possível aceder à câmara: ' + e.message;
     errEl.style.display = 'block';
   }
 }
 
 function stopCamera() {
-  if (codeReader) {
-    codeReader.reset();
-    codeReader = null;
-  }
   scanning = false;
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
   const video = document.getElementById('video');
-  video.style.display = 'none';
   video.srcObject = null;
+  video.style.display = 'none';
   document.getElementById('camPlaceholder').style.display = 'block';
   document.getElementById('scanOverlay').style.display = 'none';
   document.getElementById('btnCamera').innerHTML = '▶ Iniciar câmara';
@@ -752,28 +761,56 @@ function stopCamera() {
   document.getElementById('btnCapture').style.display = 'none';
 }
 
-// Manual capture: grab current video frame and decode from image
-async function capturePhoto() {
-  if (!scanning || !window.ZXing) return;
-
-  const video = document.getElementById('video');
-  const canvas = document.getElementById('canvas');
-  const ctx = canvas.getContext('2d');
+function decodeFrame(canvas, ctx, video) {
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
   ctx.drawImage(video, 0, 0);
 
-  try {
-    const imageReader = new ZXing.BrowserQRCodeReader();
-    const dataUrl = canvas.toDataURL('image/png');
-    const result = await imageReader.decodeFromImageUrl(dataUrl);
-    if (result && result.getText() && !scannedSet.has(result.getText())) {
-      handleQRDetected(result.getText());
-    } else {
-      showCamError('QR code não detectado na imagem. Tente ajustar a posição ou iluminação.');
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+
+  // Try all inversion modes — thermal paper often needs inversion
+  for (const mode of ['dontInvert', 'onlyInvert', 'attemptBoth']) {
+    const result = window.jsQR(imageData.data, imageData.width, imageData.height, {
+      inversionAttempts: mode
+    });
+    if (result && result.data) return result.data;
+  }
+  return null;
+}
+
+function scanLoop() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  let frameCount = 0;
+
+  const tick = () => {
+    if (!scanning) return;
+    frameCount++;
+    // Analyse every 4th frame — good balance of speed vs CPU on mobile
+    if (frameCount % 4 === 0 && video.readyState === video.HAVE_ENOUGH_DATA) {
+      const result = decodeFrame(canvas, ctx, video);
+      if (result && !scannedSet.has(result)) {
+        handleQRDetected(result);
+      }
     }
-  } catch(e) {
-    showCamError('QR code não detectado. Tente aproximar a câmara e garantir boa iluminação.');
+    rafId = requestAnimationFrame(tick);
+  };
+  rafId = requestAnimationFrame(tick);
+}
+
+// Capture button: freeze frame, try harder with full resolution
+function capturePhoto() {
+  if (!scanning) return;
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  const result = decodeFrame(canvas, ctx, video);
+  if (result && !scannedSet.has(result)) {
+    handleQRDetected(result);
+  } else {
+    showCamError('QR code não detectado. Tente melhor iluminação ou use a entrada manual.');
   }
 }
 
