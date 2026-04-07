@@ -505,15 +505,6 @@
 <!-- ═══════════════════════════ DEFINIÇÕES ═══════════════════════════ -->
 <div class="page" id="page-definicoes">
 
-  <div class="section-title">Chave API</div>
-  <div class="settings-row">
-    <div class="settings-label">Chave nif.pt <span style="font-size:11px;color:var(--muted)">(opcional, melhora a lookup de NIFs)</span></div>
-    <div class="row" style="margin-top:6px">
-      <input type="text" id="nifApiKey" placeholder="Peça a sua key gratuita em nif.pt/contactos/api" oninput="saveApiKey()">
-    </div>
-    <div style="font-size:11px;color:var(--muted);margin-top:6px">Sem key funciona em modo offline com cache local.</div>
-  </div>
-
   <div class="section-title">Backup & Restauro</div>
   <div class="backup-row">
     <div class="backup-info">
@@ -558,11 +549,9 @@
 // ═══════════════════════════════════════════════════════════
 const STORAGE_INVOICES = 'faturaspt_invoices';
 const STORAGE_NIF_CACHE = 'faturaspt_nif_cache';
-const STORAGE_API_KEY = 'faturaspt_apikey';
 
 let invoices = JSON.parse(localStorage.getItem(STORAGE_INVOICES) || '[]');
 let nifCache = JSON.parse(localStorage.getItem(STORAGE_NIF_CACHE) || '{}');
-let apiKey = localStorage.getItem(STORAGE_API_KEY) || '';
 
 function saveInvoices() { localStorage.setItem(STORAGE_INVOICES, JSON.stringify(invoices)); }
 function saveNifCache() { localStorage.setItem(STORAGE_NIF_CACHE, JSON.stringify(nifCache)); }
@@ -623,93 +612,11 @@ function parseATQR(raw) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// CAE → CATEGORY / DESIGNAÇÃO
+// NIF LOOKUP — cache only, learns from user confirmations
 // ═══════════════════════════════════════════════════════════
-function caeToSuggestion(cae) {
-  if (!cae) return { category: 'geral', desig: 'Alimentação' };
-  const c = parseInt(cae);
-  if ((c >= 47300 && c <= 47399) || c === 47300) return { category: 'combustivel', desig: 'Combustível' };
-  if ((c >= 56100 && c <= 56299) || (c >= 55100 && c <= 55209)) return { category: 'geral', desig: 'Alimentação' };
-  if (c >= 55100 && c <= 55909) return { category: 'geral', desig: 'Alojamento' };
-  if (c === 52211 || c === 52212 || c === 52213) return { category: 'geral', desig: 'Portagens' };
-  if (c >= 47400 && c <= 47499) return { category: 'geral', desig: 'Material Informático' };
-  if (c >= 47510 && c <= 47990) return { category: 'geral', desig: 'Material de Escritório' };
-  if (c >= 14100 && c <= 14399) return { category: 'geral', desig: 'Fardamento' };
-  if (c >= 49100 && c <= 53209) return { category: 'geral', desig: 'Deslocação Sócio' };
-  return { category: 'geral', desig: 'Alimentação' };
-}
-
-// ═══════════════════════════════════════════════════════════
-// NIF LOOKUP
-// ═══════════════════════════════════════════════════════════
-
-// Fallback: guess category from company name or activity text when API unavailable
-function guessFromText(text) {
-  if (!text) return null;
-  const t = text.toLowerCase();
-  const fuelWords = ['combustível','combustivel','abastecimento','petrol','galp','bp','repsol','cepsa','prio','gasoil','gasolina','gasóleo','gasoleo','posto'];
-  const foodWords = ['restaurante','café','cafe','snack','pastelaria','padaria','alimentação','alimentacao','supermercado','pingo doce','continente','lidl','aldi','mercadona','intermarché','intermarch','minipreço','minipreco','taberna','churrasqueira','tasca','take away','takeaway','refeição','refeicao','pizz','burguer','burger','mcdonald','kfc','subway','nando'];
-  const lodgeWords = ['hotel','alojamento','hostel','pensão','pensao','pousada','airbnb','apart'];
-  const tollWords = ['portagem','autoestrada','brisa','via verde','lusoponte','ascendi','scutvias','brisal'];
-  const itWords = ['informática','informatica','computador','laptop','tablet','tecnologia','media markt','worten','fnac','apple','samsung','microsoft'];
-  const clothWords = ['fardamento','vestuário','vestuario','roupa','têxtil','textil','uniforme'];
-
-  if (fuelWords.some(w => t.includes(w))) return { category: 'combustivel', desig: 'Combustível' };
-  if (lodgeWords.some(w => t.includes(w))) return { category: 'geral', desig: 'Alojamento' };
-  if (tollWords.some(w => t.includes(w))) return { category: 'geral', desig: 'Portagens' };
-  if (itWords.some(w => t.includes(w))) return { category: 'geral', desig: 'Material Informático' };
-  if (clothWords.some(w => t.includes(w))) return { category: 'geral', desig: 'Fardamento' };
-  if (foodWords.some(w => t.includes(w))) return { category: 'geral', desig: 'Alimentação' };
-  return null;
-}
-
-async function lookupNIF(nif) {
-  // 1. Cache first — fastest path
+function lookupNIF(nif) {
   if (nifCache[nif]) return { ...nifCache[nif], fromCache: true };
-
-  // 2. Try API via HTTPS proxy (nif.pt is HTTP-only, blocked by browsers on HTTPS pages)
-  // We try two proxy approaches for resilience
-  if (apiKey) {
-    const apiUrl = `https://www.nif.pt/?json=1&q=${nif}&key=${apiKey}`;
-    const proxies = [
-      `https://api.allorigins.win/get?url=${encodeURIComponent(apiUrl)}`,
-      `https://corsproxy.io/?${encodeURIComponent(apiUrl)}`,
-    ];
-
-    for (const proxyUrl of proxies) {
-      try {
-        const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(6000) });
-        const outer = await resp.json();
-        // allorigins wraps in {contents:...}, corsproxy returns directly
-        const raw = outer.contents !== undefined ? outer.contents : JSON.stringify(outer);
-        const data = JSON.parse(typeof raw === 'string' ? raw : JSON.stringify(raw));
-
-        if (data.result === 'success' && data.records && data.records[nif]) {
-          const r = data.records[nif];
-          const name = r.title || r.alias || '';
-          const activity = r.activity || '';
-          let suggestion = caeToSuggestion(r.cae);
-          // If CAE gave weak match, try name/activity text as tiebreaker
-          if (suggestion.desig === 'Alimentação') {
-            const textGuess = guessFromText(name) || guessFromText(activity);
-            if (textGuess) suggestion = textGuess;
-          }
-          const entry = {
-            name, cae: r.cae || '', activity,
-            category: suggestion.category, desig: suggestion.desig,
-            userValidated: false
-          };
-          nifCache[nif] = entry;
-          saveNifCache();
-          return { ...entry, fromCache: false };
-        }
-        break; // Got a response but no match — no point trying other proxy
-      } catch(e) { /* try next proxy */ }
-    }
-  }
-
-  // 3. No API key, API failed, or NIF not found — return placeholder
-  return { name: '', cae: '', activity: '', category: 'geral', desig: 'Alimentação', userValidated: false, noApi: !apiKey };
+  return null; // unknown NIF — user will set category manually
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -876,23 +783,16 @@ async function handleQRDetected(raw) {
 async function showConfirmPanel(parsed) {
   pendingScan = parsed;
 
-  // NIF lookup
-  const nifInfo = await lookupNIF(parsed.nifEmissor);
+  const nifInfo = lookupNIF(parsed.nifEmissor);
 
-  // Suggest category / desig
   let suggestedCat = 'geral', suggestedDesig = 'Alimentação';
-  let nifBadgeHtml = `<span class="nif-badge nif-unknown">NIF: ${parsed.nifEmissor}</span>`;
+  let nifBadgeHtml = `<span class="nif-badge nif-unknown">🆕 NIF novo: ${parsed.nifEmissor} — escolha a categoria</span>`;
 
-  if (nifInfo) {
+  if (nifInfo && nifInfo.fromCache) {
     suggestedCat = nifInfo.category;
     suggestedDesig = nifInfo.desig;
-    if (nifInfo.fromCache) {
-      nifBadgeHtml = `<span class="nif-badge nif-cached">⚡ Cache: ${nifInfo.name || parsed.nifEmissor}</span>`;
-    } else if (nifInfo.noApi) {
-      nifBadgeHtml = `<span class="nif-badge nif-unknown">⚠️ Sem key API — verifique a categoria manualmente</span>`;
-    } else {
-      nifBadgeHtml = `<span class="nif-badge nif-api">🔍 API: ${nifInfo.name || parsed.nifEmissor}</span>`;
-    }
+    const label = nifInfo.name ? nifInfo.name : parsed.nifEmissor;
+    nifBadgeHtml = `<span class="nif-badge nif-cached">⚡ Reconhecido: ${label}</span>`;
   }
 
   document.getElementById('confirmNifBadge').innerHTML = nifBadgeHtml;
@@ -979,15 +879,16 @@ function saveScan() {
   invoices.push(inv);
   saveInvoices();
 
-  // Update nif cache with user's choice (mark as validated)
+  // Update nif cache with user's confirmed choice
   const nif = pendingScan.nifEmissor;
-  if (nifCache[nif]) {
-    nifCache[nif].category = cat;
-    nifCache[nif].desig = desig;
-    nifCache[nif].userValidated = true;
-  } else {
-    nifCache[nif] = { name: '', cae: '', category: cat, desig, userValidated: true };
-  }
+  const existing = nifCache[nif] || {};
+  nifCache[nif] = {
+    ...existing,
+    category: cat,
+    desig,
+    name: existing.name || '',
+    userValidated: true
+  };
   saveNifCache();
 
   pendingScan = null;
@@ -1216,24 +1117,24 @@ function exportBoth() {
 // SETTINGS
 // ═══════════════════════════════════════════════════════════
 function renderSettings() {
-  document.getElementById('nifApiKey').value = apiKey;
   const count = Object.keys(nifCache).length;
   const validated = Object.values(nifCache).filter(v => v.userValidated).length;
   document.getElementById('nifCacheInfo').innerHTML =
-    `<strong>${count}</strong> NIFs em cache · <strong>${validated}</strong> validados por si<br><br>` +
-    Object.entries(nifCache).slice(0, 8).map(([nif, d]) =>
-      `<span style="font-size:11px;display:block;margin-bottom:3px">
-        ${nif} — ${d.name || '(sem nome)'} <span style="color:var(--accent)">${d.desig}</span>
-        ${d.userValidated ? '✓' : ''}
-      </span>`
-    ).join('') +
-    (count > 8 ? `<span style="font-size:11px;color:var(--muted)">...e mais ${count-8}</span>` : '');
+    `<strong>${count}</strong> NIFs em cache · <strong>${validated}</strong> confirmados por si<br><br>` +
+    (count === 0
+      ? '<span style="color:var(--muted)">Ainda sem NIFs aprendidos. Cada fatura que guardar ensina a app.</span>'
+      : Object.entries(nifCache).slice(0, 10).map(([nif, d]) => {
+          const cat = d.category === 'combustivel' ? '⛽' : '📋';
+          return `<span style="font-size:12px;display:flex;justify-content:space-between;margin-bottom:4px;padding:4px 0;border-bottom:1px solid var(--border)">
+            <span>${cat} <strong>${nif}</strong> ${d.name ? '· ' + d.name : ''}</span>
+            <span style="color:var(--accent)">${d.desig}</span>
+          </span>`;
+        }).join('') +
+      (count > 10 ? `<span style="font-size:11px;color:var(--muted)">...e mais ${count - 10} NIFs</span>` : '')
+    );
 }
 
-function saveApiKey() {
-  apiKey = document.getElementById('nifApiKey').value.trim();
-  localStorage.setItem(STORAGE_API_KEY, apiKey);
-}
+function saveApiKey() {} // kept for compatibility, no longer used
 
 function clearNifCache() {
   if (!confirm('Limpar toda a cache de NIFs aprendidos?')) return;
