@@ -69,60 +69,7 @@
     gap: 12px;
   }
 
-  .viewfinder {
-    position: relative;
-    background: #000;
-    border-radius: 16px;
-    overflow: hidden;
-    aspect-ratio: 4/3;
-    border: 1px solid var(--border);
-  }
-
-  #video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-
-  .viewfinder-overlay {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    pointer-events: none;
-  }
-
-  .qr-frame {
-    width: 140px;
-    height: 140px;
-    position: relative;
-  }
-
-  .qr-frame::before, .qr-frame::after,
-  .qr-frame span::before, .qr-frame span::after {
-    content: '';
-    position: absolute;
-    width: 24px;
-    height: 24px;
-    border-color: var(--accent);
-    border-style: solid;
-  }
-  .qr-frame::before { top: 0; left: 0; border-width: 3px 0 0 3px; }
-  .qr-frame::after  { top: 0; right: 0; border-width: 3px 3px 0 0; }
-  .qr-frame span::before { bottom: 0; left: 0; border-width: 0 0 3px 3px; }
-  .qr-frame span::after  { bottom: 0; right: 0; border-width: 0 3px 3px 0; }
-
-  .camera-hint {
-    position: absolute;
-    bottom: 12px;
-    left: 0; right: 0;
-    text-align: center;
-    font-size: 11px;
-    color: rgba(255,255,255,0.5);
-    font-family: 'DM Mono', monospace;
-  }
+  
 
   #canvas { display: none; }
 
@@ -146,34 +93,7 @@
   .btn-capture:active { opacity: 0.85; transform: scale(0.98); }
   .btn-capture:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  .camera-off-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    aspect-ratio: 4/3;
-    background: var(--surface);
-    border-radius: 16px;
-    border: 1px dashed var(--border);
-    color: var(--muted);
-    font-size: 13px;
-  }
-  .camera-off-state .icon { font-size: 32px; }
-
-  .btn-start-cam {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    color: var(--text);
-    border-radius: 12px;
-    padding: 12px 20px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-  .btn-start-cam:hover { background: #2e2e2e; }
+  
 
   /* ── PROCESSING STATE ── */
   .processing-overlay {
@@ -437,6 +357,15 @@
 
 
 
+  .camera-hint-static {
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    padding: 8px 0 0;
+    line-height: 1.6;
+  }
+
   .toast {
     position: fixed;
     bottom: 90px;
@@ -468,38 +397,13 @@
 
 <!-- Camera section -->
 <div class="camera-section">
-  <div id="cameraOff" class="camera-off-state">
-    <span class="icon">📷</span>
-    <span>Câmara desligada</span>
-    <button class="btn-start-cam" onclick="startCamera()">Iniciar câmara</button>
-  </div>
-
-  <div id="cameraOn" style="display:none; flex-direction:column; gap:12px;">
-    <div class="viewfinder">
-      <video id="video" autoplay playsinline muted></video>
-      <div class="viewfinder-overlay">
-        <div class="qr-frame"><span></span></div>
-      </div>
-      <!-- Tap to focus overlay -->
-      <div id="viewfinderTap" style="position:absolute;inset:0;cursor:pointer;"></div>
-      <!-- Focus ring feedback -->
-      <div id="focusRing" style="
-        position:absolute;
-        width:48px;height:48px;
-        border:2px solid #fff;
-        border-radius:50%;
-        pointer-events:none;
-        opacity:0;
-        transition:opacity 0.4s, transform 0.4s;
-        transform:scale(1.3);
-      "></div>
-      <div class="camera-hint">Toque para focar · Capture quando nítido</div>
-    </div>
-    <canvas id="canvas"></canvas>
-    <button class="btn-capture" id="btnCapture" onclick="captureAndAnalyze()">
-      <span>⬤</span> Capturar QR Code
-    </button>
-  </div>
+  <label for="photoInput" class="btn-capture" id="btnCapture" style="display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;">
+    <span>📷</span> Fotografar QR Code
+  </label>
+  <input type="file" id="photoInput" accept="image/*" capture="environment"
+    style="display:none;" onchange="handlePhoto(this)">
+  <canvas id="canvas" style="display:none;"></canvas>
+  <div class="camera-hint-static">A câmara nativa abre automaticamente · Foca no QR e fotografa</div>
 </div>
 
 <!-- Invoice list -->
@@ -600,166 +504,103 @@ window.addEventListener('load', () => {
   renderList();
 });
 
-// ── CAMERA ──
-let stream = null;
 
-async function startCamera() {
-  try {
-    // Primeiro abre com configuração básica
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        facingMode: 'environment',
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      }
-    });
-
-    const video = document.getElementById('video');
-    video.srcObject = stream;
-    document.getElementById('cameraOff').style.display = 'none';
-    document.getElementById('cameraOn').style.display = 'flex';
-
-    // Aguarda o stream iniciar e tenta configurar foco contínuo próximo
-    video.addEventListener('loadedmetadata', async () => {
-      const track = stream.getVideoTracks()[0];
-      const caps = track.getCapabilities();
-      console.log('Camera capabilities:', caps);
-
-      const constraints = {};
-
-      // Foco contínuo para macro (papel térmico de perto)
-      if (caps.focusMode && caps.focusMode.includes('continuous')) {
-        constraints.focusMode = 'continuous';
-      }
-      // Distância focal mínima se suportado
-      if (caps.focusDistance) {
-        constraints.focusMode = 'manual';
-        constraints.focusDistance = caps.focusDistance.min;
-      }
-
-      if (Object.keys(constraints).length > 0) {
-        try {
-          await track.applyConstraints({ advanced: [constraints] });
-          console.log('Focus constraints applied:', constraints);
-        } catch(e) {
-          console.log('Focus constraint failed (normal):', e.message);
-        }
-      }
-    });
-
-    // Toque no viewfinder para focar nesse ponto
-    document.getElementById('viewfinderTap').addEventListener('click', async (e) => {
-      if (!stream) return;
-      const track = stream.getVideoTracks()[0];
-      const caps = track.getCapabilities();
-      if (caps.pointsOfInterest) {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const x = (e.clientX - rect.left) / rect.width;
-        const y = (e.clientY - rect.top) / rect.height;
-        try {
-          await track.applyConstraints({
-            advanced: [{ pointsOfInterest: [{ x, y }], focusMode: 'single-shot' }]
-          });
-          // Feedback visual
-          showFocusRing(e.clientX - rect.left, e.clientY - rect.top);
-        } catch(e) {
-          console.log('Point of interest not supported');
-        }
-      }
-    });
-
-  } catch (e) {
-    showToast('Erro: permissão de câmara negada');
-    console.error(e);
-  }
-}
-
-function showFocusRing(x, y) {
-  const ring = document.getElementById('focusRing');
-  ring.style.left = (x - 24) + 'px';
-  ring.style.top = (y - 24) + 'px';
-  ring.style.opacity = '1';
-  ring.style.transform = 'scale(1)';
-  setTimeout(() => {
-    ring.style.opacity = '0';
-    ring.style.transform = 'scale(1.3)';
-  }, 600);
-}
-
-function captureFrame() {
-  const video = document.getElementById('video');
-  const canvas = document.getElementById('canvas');
-  const maxW = 800;
-  const scale = Math.min(1, maxW / video.videoWidth);
-  canvas.width = Math.round(video.videoWidth * scale);
-  canvas.height = Math.round(video.videoHeight * scale);
-  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL('image/jpeg', 0.80).split(',')[1];
-}
-
-// ── BARCODE DETECTION (local, sem API) ──
+// ── QR READING VIA NATIVE CAMERA PHOTO ──
 let barcodeDetector = null;
 
 async function initBarcodeDetector() {
-  if (!('BarcodeDetector' in window)) {
-    showToast('Este browser não suporta leitura de QR. Usa Chrome Android.');
-    return false;
+  if ('BarcodeDetector' in window) {
+    try {
+      const formats = await BarcodeDetector.getSupportedFormats();
+      if (formats.includes('qr_code')) {
+        barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+        return 'native';
+      }
+    } catch(e) {}
   }
-  const formats = await BarcodeDetector.getSupportedFormats();
-  if (!formats.includes('qr_code')) {
-    showToast('QR code não suportado neste dispositivo.');
-    return false;
-  }
-  barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
-  return true;
+  // Fallback: jsQR via CDN
+  return 'jsqr';
 }
 
-async function captureAndAnalyze() {
-  const btn = document.getElementById('btnCapture');
+async function handlePhoto(input) {
+  if (!input.files || !input.files[0]) return;
+  const file = input.files[0];
+  input.value = ''; // reset so same photo can be retried
+
   const overlay = document.getElementById('processingOverlay');
-
-  // Init detector if needed
-  if (!barcodeDetector) {
-    const ok = await initBarcodeDetector();
-    if (!ok) return;
-  }
-
-  btn.disabled = true;
   overlay.classList.add('active');
   overlay.querySelector('.processing-text').textContent = 'A ler QR code...';
 
   try {
-    const video = document.getElementById('video');
+    // Draw image to canvas
+    const img = await loadImage(file);
+    const canvas = document.getElementById('canvas');
+    // Scale down if very large
+    const maxW = 1200;
+    const scale = Math.min(1, maxW / img.width);
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-    // Try up to 5 frames rapidly for robustness
     let rawValue = null;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const barcodes = await barcodeDetector.detect(video);
-      if (barcodes.length > 0) {
-        rawValue = barcodes[0].rawValue;
-        break;
-      }
-      await new Promise(r => setTimeout(r, 200));
+
+    // Try native BarcodeDetector first
+    if (!barcodeDetector) await initBarcodeDetector();
+
+    if (barcodeDetector) {
+      try {
+        const bitmap = await createImageBitmap(canvas);
+        const codes = await barcodeDetector.detect(bitmap);
+        if (codes.length > 0) rawValue = codes[0].rawValue;
+      } catch(e) { console.log('Native detector failed:', e); }
+    }
+
+    // Fallback: jsQR
+    if (!rawValue) {
+      rawValue = await tryJsQR(ctx, canvas.width, canvas.height);
     }
 
     overlay.classList.remove('active');
-    btn.disabled = false;
 
     if (!rawValue) {
-      showToast('QR não detectado — aproxima mais e tenta de novo');
+      showToast('QR não lido — tenta com melhor iluminação ou mais perto');
       return;
     }
 
-    // Parse ATCUD QR code format: CAMPO:VALOR*CAMPO:VALOR*...
     const parsed = parseATCUD(rawValue);
     openConfirm(parsed);
 
-  } catch (e) {
+  } catch(e) {
     overlay.classList.remove('active');
-    btn.disabled = false;
     showToast('Erro: ' + e.message);
     console.error(e);
   }
+}
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function tryJsQR(ctx, w, h) {
+  // Lazy-load jsQR
+  if (!window.jsQR) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const code = jsQR(imageData.data, w, h, { inversionAttempts: 'dontInvert' });
+  return code ? code.data : null;
 }
 
 function parseATCUD(raw) {
