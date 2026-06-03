@@ -480,7 +480,20 @@
       <div class="viewfinder-overlay">
         <div class="qr-frame"><span></span></div>
       </div>
-      <div class="camera-hint">Aponte para o QR code e capture</div>
+      <!-- Tap to focus overlay -->
+      <div id="viewfinderTap" style="position:absolute;inset:0;cursor:pointer;"></div>
+      <!-- Focus ring feedback -->
+      <div id="focusRing" style="
+        position:absolute;
+        width:48px;height:48px;
+        border:2px solid #fff;
+        border-radius:50%;
+        pointer-events:none;
+        opacity:0;
+        transition:opacity 0.4s, transform 0.4s;
+        transform:scale(1.3);
+      "></div>
+      <div class="camera-hint">Toque para focar · Capture quando nítido</div>
     </div>
     <canvas id="canvas"></canvas>
     <button class="btn-capture" id="btnCapture" onclick="captureAndAnalyze()">
@@ -592,16 +605,85 @@ let stream = null;
 
 async function startCamera() {
   try {
+    // Primeiro abre com configuração básica
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      video: {
+        facingMode: 'environment',
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      }
     });
+
     const video = document.getElementById('video');
     video.srcObject = stream;
     document.getElementById('cameraOff').style.display = 'none';
     document.getElementById('cameraOn').style.display = 'flex';
+
+    // Aguarda o stream iniciar e tenta configurar foco contínuo próximo
+    video.addEventListener('loadedmetadata', async () => {
+      const track = stream.getVideoTracks()[0];
+      const caps = track.getCapabilities();
+      console.log('Camera capabilities:', caps);
+
+      const constraints = {};
+
+      // Foco contínuo para macro (papel térmico de perto)
+      if (caps.focusMode && caps.focusMode.includes('continuous')) {
+        constraints.focusMode = 'continuous';
+      }
+      // Distância focal mínima se suportado
+      if (caps.focusDistance) {
+        constraints.focusMode = 'manual';
+        constraints.focusDistance = caps.focusDistance.min;
+      }
+
+      if (Object.keys(constraints).length > 0) {
+        try {
+          await track.applyConstraints({ advanced: [constraints] });
+          console.log('Focus constraints applied:', constraints);
+        } catch(e) {
+          console.log('Focus constraint failed (normal):', e.message);
+        }
+      }
+    });
+
+    // Toque no viewfinder para focar nesse ponto
+    document.getElementById('viewfinderTap').addEventListener('click', async (e) => {
+      if (!stream) return;
+      const track = stream.getVideoTracks()[0];
+      const caps = track.getCapabilities();
+      if (caps.pointsOfInterest) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = (e.clientX - rect.left) / rect.width;
+        const y = (e.clientY - rect.top) / rect.height;
+        try {
+          await track.applyConstraints({
+            advanced: [{ pointsOfInterest: [{ x, y }], focusMode: 'single-shot' }]
+          });
+          // Feedback visual
+          showFocusRing(e.clientX - rect.left, e.clientY - rect.top);
+        } catch(e) {
+          console.log('Point of interest not supported');
+        }
+      }
+    });
+
   } catch (e) {
     showToast('Erro: permissão de câmara negada');
+    console.error(e);
   }
+}
+
+function showFocusRing(x, y) {
+  const ring = document.getElementById('focusRing');
+  ring.style.left = (x - 24) + 'px';
+  ring.style.top = (y - 24) + 'px';
+  ring.style.opacity = '1';
+  ring.style.transform = 'scale(1)';
+  setTimeout(() => {
+    ring.style.opacity = '0';
+    ring.style.transform = 'scale(1.3)';
+  }, 600);
 }
 
 function captureFrame() {
