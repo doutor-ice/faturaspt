@@ -435,46 +435,7 @@
   .btn-export.fuel { color: var(--fuel); border-color: rgba(90,180,255,0.3); }
   .btn-export.geral { color: var(--accent); border-color: rgba(232,255,90,0.3); }
 
-  /* ── API KEY ── */
-  .apikey-bar {
-    margin: 12px 20px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 10px 14px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-  .apikey-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    color: var(--muted);
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
-  .apikey-input {
-    flex: 1;
-    background: transparent;
-    border: none;
-    color: var(--text);
-    font-family: 'DM Mono', monospace;
-    font-size: 12px;
-    outline: none;
-    min-width: 0;
-  }
-  .apikey-input::placeholder { color: #444; }
-  .apikey-save {
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    color: var(--accent);
-    font-family: 'DM Mono', monospace;
-    font-size: 11px;
-    padding: 5px 10px;
-    border-radius: 8px;
-    cursor: pointer;
-    white-space: nowrap;
-  }
+
 
   .toast {
     position: fixed;
@@ -503,12 +464,7 @@
   <div class="badge-count" id="countBadge">0 faturas</div>
 </header>
 
-<!-- API Key bar -->
-<div class="apikey-bar">
-  <span class="apikey-label">API Key</span>
-  <input type="password" class="apikey-input" id="apiKeyInput" placeholder="sk-ant-..." autocomplete="off">
-  <button class="apikey-save" onclick="saveApiKey()">Guardar</button>
-</div>
+
 
 <!-- Camera section -->
 <div class="camera-section">
@@ -615,7 +571,6 @@
 // ── STORAGE ──
 const STORAGE_KEY = 'faturas_qr_v2';
 const NIF_CACHE_KEY = 'faturas_nif_cache';
-const APIKEY_KEY = 'faturas_apikey';
 
 const FUEL_DESIGNACOES = ['combustivel','gasolina','gasóleo','bp','galp','repsol','prio','cepsa'];
 
@@ -624,21 +579,10 @@ let nifCache = JSON.parse(localStorage.getItem(NIF_CACHE_KEY) || '{}');
 let currentCategoria = 'geral';
 
 // ── API KEY ──
-function saveApiKey() {
-  const key = document.getElementById('apiKeyInput').value.trim();
-  if (!key) return;
-  localStorage.setItem(APIKEY_KEY, key);
-  showToast('API Key guardada ✓');
-}
-
-function getApiKey() {
-  return localStorage.getItem(APIKEY_KEY) || document.getElementById('apiKeyInput').value.trim();
-}
+// API key não necessária — leitura local via BarcodeDetector
 
 // Load saved key on init
 window.addEventListener('load', () => {
-  const saved = localStorage.getItem(APIKEY_KEY);
-  if (saved) document.getElementById('apiKeyInput').value = saved;
   updateMonthLabel();
   renderList();
 });
@@ -663,103 +607,108 @@ async function startCamera() {
 function captureFrame() {
   const video = document.getElementById('video');
   const canvas = document.getElementById('canvas');
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-  canvas.getContext('2d').drawImage(video, 0, 0);
-  return canvas.toDataURL('image/jpeg', 0.92).split(',')[1];
+  const maxW = 800;
+  const scale = Math.min(1, maxW / video.videoWidth);
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL('image/jpeg', 0.80).split(',')[1];
 }
 
-// ── ANALYZE WITH CLAUDE API ──
+// ── BARCODE DETECTION (local, sem API) ──
+let barcodeDetector = null;
+
+async function initBarcodeDetector() {
+  if (!('BarcodeDetector' in window)) {
+    showToast('Este browser não suporta leitura de QR. Usa Chrome Android.');
+    return false;
+  }
+  const formats = await BarcodeDetector.getSupportedFormats();
+  if (!formats.includes('qr_code')) {
+    showToast('QR code não suportado neste dispositivo.');
+    return false;
+  }
+  barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+  return true;
+}
+
 async function captureAndAnalyze() {
-  const apiKey = getApiKey();
-  if (!apiKey || !apiKey.startsWith('sk-ant-')) {
-    showToast('Introduz uma API Key válida primeiro');
-    return;
+  const btn = document.getElementById('btnCapture');
+  const overlay = document.getElementById('processingOverlay');
+
+  // Init detector if needed
+  if (!barcodeDetector) {
+    const ok = await initBarcodeDetector();
+    if (!ok) return;
   }
 
-  const btn = document.getElementById('btnCapture');
   btn.disabled = true;
-
-  const overlay = document.getElementById('processingOverlay');
   overlay.classList.add('active');
+  overlay.querySelector('.processing-text').textContent = 'A ler QR code...';
 
   try {
-    const imageData = captureFrame();
+    const video = document.getElementById('video');
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 500,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: 'image/jpeg', data: imageData }
-            },
-            {
-              type: 'text',
-              text: `Esta imagem contém um QR code de uma fatura portuguesa (formato AT/ATCUD).
-Por favor lê o QR code e extrai os campos. O formato do QR code é uma string com campos separados por * no formato CAMPO:VALOR.
-Campos principais: A=NIF emitente, B=NIF adquirente, C=país, D=tipo doc, E=estado, F=data(YYYYMMDD), G=nº documento, H=ATCUD, I1-I9=bases/IVA por taxa, N=total IVA, O=total bruto, P=hash.
+    // Try up to 5 frames rapidly for robustness
+    let rawValue = null;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const barcodes = await barcodeDetector.detect(video);
+      if (barcodes.length > 0) {
+        rawValue = barcodes[0].rawValue;
+        break;
+      }
+      await new Promise(r => setTimeout(r, 200));
+    }
 
-Responde APENAS com JSON válido, sem markdown, sem texto adicional:
-{
-  "nif": "NIF do emitente (campo A)",
-  "data": "data no formato YYYY-MM-DD (campo F)",
-  "doc": "número do documento (campo G)",
-  "atcud": "código ATCUD (campo H)",
-  "total": número_total_com_IVA (campo O, número),
-  "iva": número_total_IVA (campo N, número),
-  "tipo": "tipo de documento (campo D)",
-  "raw": "string completa do QR code se conseguires ler"
-}
-Se não conseguires ler o QR code, responde: {"erro": "QR code ilegível"}`
-            }
-          ]
-        }]
-      })
-    });
-
-    const data = await response.json();
     overlay.classList.remove('active');
     btn.disabled = false;
 
-    if (!response.ok) {
-      showToast('Erro API: ' + (data.error?.message || response.status));
+    if (!rawValue) {
+      showToast('QR não detectado — aproxima mais e tenta de novo');
       return;
     }
 
-    const text = data.content?.[0]?.text || '';
-    let parsed;
-    try {
-      parsed = JSON.parse(text.replace(/```json|```/g, '').trim());
-    } catch {
-      showToast('Resposta inválida do Claude');
-      return;
-    }
-
-    if (parsed.erro) {
-      showToast('QR code ilegível — tente novamente');
-      return;
-    }
-
+    // Parse ATCUD QR code format: CAMPO:VALOR*CAMPO:VALOR*...
+    const parsed = parseATCUD(rawValue);
     openConfirm(parsed);
 
   } catch (e) {
     overlay.classList.remove('active');
     btn.disabled = false;
-    showToast('Erro de rede: ' + e.message);
+    showToast('Erro: ' + e.message);
+    console.error(e);
   }
 }
 
+function parseATCUD(raw) {
+  // Format: A:NIF*B:NIF*C:PT*D:FT*E:N*F:YYYYMMDD*G:FT X/N*H:ATCUD*...*N:IVA*O:TOTAL*P:HASH
+  const fields = {};
+  raw.split('*').forEach(part => {
+    const idx = part.indexOf(':');
+    if (idx > 0) {
+      const key = part.substring(0, idx).trim();
+      const val = part.substring(idx + 1).trim();
+      fields[key] = val;
+    }
+  });
+
+  // Parse date YYYYMMDD → YYYY-MM-DD
+  let data = '';
+  if (fields['F'] && fields['F'].length === 8) {
+    data = fields['F'].substring(0,4) + '-' + fields['F'].substring(4,6) + '-' + fields['F'].substring(6,8);
+  }
+
+  return {
+    nif:   fields['A'] || '',
+    data:  data,
+    doc:   fields['G'] || '',
+    atcud: fields['H'] || '',
+    total: parseFloat(fields['O']) || 0,
+    iva:   parseFloat(fields['N']) || 0,
+    tipo:  fields['D'] || '',
+    raw:   raw
+  };
+}
 // ── CONFIRM DIALOG ──
 function openConfirm(data) {
   document.getElementById('fData').value = data.data || '';
