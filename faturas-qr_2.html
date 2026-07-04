@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Faturas QR</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --surface2: #242424;
+    --border: #2e2e2e;
+    --accent: #e8ff5a;
+    --accent2: #5affb8;
+    --text: #f0f0f0;
+    --muted: #888;
+    --danger: #ff5a5a;
+    --fuel: #5ab4ff;
+    --cartao: #c084fc;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    max-width: 480px;
+    margin: 0 auto;
+    padding-bottom: 130px;
+  }
+
+  header {
+    padding: 20px 20px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo {
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .badge-count {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    color: var(--muted);
+  }
+
+  /* ── CAMERA SECTION ── */
+
+
+  
+
+  #canvas { display: none; }
+
+  .btn-capture {
+    background: var(--accent);
+    color: #0f0f0f;
+    border: none;
+    border-radius: 14px;
+    padding: 16px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: opacity 0.15s, transform 0.1s;
+    width: 100%;
+  }
+  .btn-capture:active { opacity: 0.85; transform: scale(0.98); }
+  .btn-capture:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  
+
+  /* ── PROCESSING STATE ── */
+  .processing-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .processing-overlay.active { display: flex; }
+
+  .spinner {
+    width: 40px; height: 40px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .processing-text {
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* ── CONFIRM DIALOG ── */
+  .confirm-dialog {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 200;
+    align-items: flex-end;
+    justify-content: center;
+    padding: 0;
+  }
+  .confirm-dialog.active { display: flex; }
+
+  .confirm-sheet {
+    background: var(--surface);
+    border-radius: 24px 24px 0 0;
+    padding: 28px 20px 40px;
+    width: 100%;
+    max-width: 480px;
+    border-top: 1px solid var(--border);
+  }
+
+  .confirm-title {
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 20px;
+  }
+
+  .field-group { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+
+  .field-row {
+    display: flex;
+    align-items: center;
+    background: var(--surface2);
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .field-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    padding: 0 10px;
+    min-width: 90px;
+    letter-spacing: 0.06em;
+  }
+  .field-value {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    padding: 12px 10px;
+    outline: none;
+    min-width: 0;
+  }
+  .field-value::placeholder { color: var(--muted); }
+
+  .cat-selector { display: flex; gap: 8px; margin-bottom: 20px; }
+  .cat-btn {
+    flex: 1;
+    padding: 12px 8px;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--muted);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .cat-btn.active-geral { background: rgba(232,255,90,0.12); border-color: var(--accent); color: var(--accent); }
+  .cat-btn.active-comb  { background: rgba(90,180,255,0.12); border-color: var(--fuel);  color: var(--fuel);  }
+  .cat-btn.active-cartao{ background: rgba(192,132,252,0.12); border-color: var(--cartao); color: var(--cartao); }
+
+  .designacao-select {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    padding: 12px;
+    outline: none;
+    margin-bottom: 20px;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+
+  .confirm-actions { display: flex; gap: 10px; }
+  .btn-save {
+    flex: 2;
+    background: var(--accent);
+    color: #0f0f0f;
+    border: none;
+    border-radius: 12px;
+    padding: 14px;
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .btn-cancel {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    border-radius: 12px;
+    padding: 14px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  /* ── LISTA ── */
+  .section-header {
+    padding: 8px 20px 12px;
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .invoice-list { padding: 0 16px; display: flex; flex-direction: column; gap: 8px; }
+
+  .invoice-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    animation: slideIn 0.2s ease;
+  }
+  @keyframes slideIn { from { opacity:0; transform: translateY(8px); } to { opacity:1; transform:none; } }
+
+  .card-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot-geral { background: var(--accent); }
+  .dot-comb  { background: var(--fuel); }
+  .dot-cartao { background: var(--cartao); }
+
+  .card-body { flex: 1; min-width: 0; }
+  .card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .card-desig {
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .card-total {
+    font-family: 'DM Mono', monospace;
+    font-size: 14px;
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .card-meta {
+    font-size: 11px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    margin-top: 3px;
+  }
+
+  .btn-delete {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 16px;
+    cursor: pointer;
+    padding: 4px;
+    flex-shrink: 0;
+    line-height: 1;
+    opacity: 0.5;
+  }
+  .btn-delete:hover { opacity: 1; color: var(--danger); }
+
+  .empty-state {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.8;
+  }
+  .empty-state .icon { font-size: 28px; display: block; margin-bottom: 8px; }
+
+  /* ── BOTTOM BAR ── */
+  .bottom-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    max-width: 480px;
+    margin: 0 auto;
+    background: var(--bg);
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .bottom-exports {
+    display: flex;
+    gap: 8px;
+  }
+
+  .btn-capture-fab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--accent);
+    color: #0f0f0f;
+    border-radius: 14px;
+    padding: 15px;
+    font-size: 22px;
+    cursor: pointer;
+    width: 100%;
+    text-align: center;
+    transition: opacity 0.15s, transform 0.1s;
+    user-select: none;
+  }
+  .btn-capture-fab:active { opacity: 0.85; transform: scale(0.98); }
+
+  .btn-export {
+    flex: 1;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    border-radius: 12px;
+    padding: 13px 8px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: center;
+    transition: background 0.15s;
+  }
+  .btn-export:hover { background: var(--surface2); }
+  .btn-export.fuel { color: var(--fuel); border-color: rgba(90,180,255,0.3); }
+  .btn-export.cartao { color: var(--cartao); border-color: rgba(192,132,252,0.3); }
+  .btn-export.geral { color: var(--accent); border-color: rgba(232,255,90,0.3); }
+
+
+
+  .toast {
+    position: fixed;
+    bottom: 90px;
+    left: 50%; transform: translateX(-50%);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    padding: 10px 18px;
+    border-radius: 20px;
+    z-index: 999;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+    white-space: nowrap;
+  }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">⬡ Faturas QR</div>
+  <div class="badge-count" id="countBadge">0 faturas</div>
+</header>
+
+
+
+<canvas id="canvas" style="display:none;"></canvas>
+
+<!-- Invoice list -->
+<div class="section-header">
+  <span>Faturas registadas</span>
+  <span id="monthLabel"></span>
+</div>
+<div style="padding: 0 16px 12px; display:flex; gap:8px;">
+  <button class="btn-export" onclick="exportNifCache()" style="flex:1;font-size:12px;padding:9px 6px;color:var(--muted);">
+    💾 Guardar NIFs
+  </button>
+  <button class="btn-export" onclick="document.getElementById('nifImportInput').click()" style="flex:1;font-size:12px;padding:9px 6px;color:var(--muted);">
+    📂 Carregar NIFs
+  </button>
+  <input type="file" id="nifImportInput" accept=".json" style="display:none;" onchange="importNifCache(this)">
+</div>
+<div class="invoice-list" id="invoiceList">
+  <div class="empty-state">
+    <span class="icon">◎</span>
+    Nenhuma fatura ainda.<br>Aponte a câmara ao QR code da fatura.
+  </div>
+</div>
+
+<!-- Processing overlay -->
+<div class="processing-overlay" id="processingOverlay">
+  <div class="spinner"></div>
+  <div class="processing-text">A ler o QR code...</div>
+</div>
+
+<!-- Confirm dialog -->
+<div class="confirm-dialog" id="confirmDialog">
+  <div class="confirm-sheet">
+    <div class="confirm-title">✦ Confirmar fatura</div>
+
+    <div class="field-group">
+      <div class="field-row">
+        <span class="field-label">Data</span>
+        <input type="date" class="field-value" id="fData">
+      </div>
+      <div class="field-row">
+        <span class="field-label">Total €</span>
+        <input type="number" class="field-value" id="fTotal" step="0.01" placeholder="0.00">
+      </div>
+      <div class="field-row">
+        <span class="field-label">IVA €</span>
+        <input type="number" class="field-value" id="fIva" step="0.01" placeholder="0.00">
+      </div>
+      <div class="field-row">
+        <span class="field-label">Nº Doc</span>
+        <input type="text" class="field-value" id="fDoc" placeholder="FT 001/1234">
+      </div>
+      <div class="field-row">
+        <span class="field-label">NIF</span>
+        <input type="text" class="field-value" id="fNif" placeholder="123456789">
+      </div>
+      <div class="field-row" style="display:none;">
+        <input type="hidden" id="fAtcud">
+      </div>
+    </div>
+
+    <div class="cat-selector">
+      <button class="cat-btn active-geral" id="btnGeral" onclick="setCategoria('geral')">Geral</button>
+      <button class="cat-btn" id="btnComb" onclick="setCategoria('combustivel')">Combustível</button>
+      <button class="cat-btn" id="btnCartao" onclick="setCategoria('cartao')">Cartão Emp.</button>
+    </div>
+
+    <div id="desigRow">
+    <select class="designacao-select" id="fDesig">
+      <option value="Alimentação">Alimentação</option>
+      <option value="Alojamento">Alojamento</option>
+      <option value="Deslocação Sócio">Deslocação Sócio</option>
+      <option value="Oferta Clientes">Oferta Clientes</option>
+      <option value="Fardamento">Fardamento</option>
+      <option value="Material Informático">Material Informático</option>
+      <option value="Material de Escritório">Material de Escritório</option>
+      <option value="Portagens">Portagens</option>
+      <option value="Outro">Outro</option>
+    </select>
+    </div>
+
+    <div class="confirm-actions">
+      <button class="btn-save" onclick="saveInvoice()">Guardar</button>
+      <button class="btn-cancel" onclick="closeConfirm()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bottom bar -->
+<div class="bottom-bar">
+  <div class="bottom-exports">
+    <button class="btn-export geral" onclick="exportExcel('geral')">↓ Gerais</button>
+    <button class="btn-export fuel" onclick="exportExcel('combustivel')">↓ Comb.</button>
+    <button class="btn-export cartao" onclick="exportCartaoCSV()">↓ Cartão</button>
+  </div>
+  <label for="photoInput" class="btn-capture-fab" title="Fotografar QR Code">
+    📷
+  </label>
+  <input type="file" id="photoInput" accept="image/*" capture="environment"
+    style="display:none;" onchange="handlePhoto(this)">
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── STORAGE ──
+const STORAGE_KEY = 'faturas_qr_v2';
+const NIF_CACHE_KEY = 'faturas_nif_cache';
+
+const FUEL_DESIGNACOES = ['combustivel','gasolina','gasóleo','bp','galp','repsol','prio','cepsa'];
+
+let invoices = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+let nifCache = JSON.parse(localStorage.getItem(NIF_CACHE_KEY) || '{}');
+let currentCategoria = 'geral';
+
+// ── API KEY ──
+// API key não necessária — leitura local via BarcodeDetector
+
+// Load saved key on init
+window.addEventListener('load', () => {
+  updateMonthLabel();
+  renderList();
+});
+
+
+// ── QR READING VIA NATIVE CAMERA PHOTO ──
+let barcodeDetector = null;
+
+async function initBarcodeDetector() {
+  if ('BarcodeDetector' in window) {
+    try {
+      const formats = await BarcodeDetector.getSupportedFormats();
+      if (formats.includes('qr_code')) {
+        barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
+        return 'native';
+      }
+    } catch(e) {}
+  }
+  // Fallback: jsQR via CDN
+  return 'jsqr';
+}
+
+async function handlePhoto(input) {
+  if (!input.files || !input.files[0]) return;
+  const file = input.files[0];
+  input.value = ''; // reset so same photo can be retried
+
+  const overlay = document.getElementById('processingOverlay');
+  overlay.classList.add('active');
+  overlay.querySelector('.processing-text').textContent = 'A ler QR code...';
+
+  try {
+    // Draw image to canvas
+    const img = await loadImage(file);
+    const canvas = document.getElementById('canvas');
+    // Scale down if very large
+    const maxW = 1200;
+    const scale = Math.min(1, maxW / img.width);
+    canvas.width = Math.round(img.width * scale);
+    canvas.height = Math.round(img.height * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    let rawValue = null;
+
+    // Try native BarcodeDetector first
+    if (!barcodeDetector) await initBarcodeDetector();
+
+    if (barcodeDetector) {
+      try {
+        const bitmap = await createImageBitmap(canvas);
+        const codes = await barcodeDetector.detect(bitmap);
+        if (codes.length > 0) rawValue = codes[0].rawValue;
+      } catch(e) { console.log('Native detector failed:', e); }
+    }
+
+    // Fallback: jsQR
+    if (!rawValue) {
+      rawValue = await tryJsQR(ctx, canvas.width, canvas.height);
+    }
+
+    overlay.classList.remove('active');
+
+    if (!rawValue) {
+      showToast('QR não lido — tenta com melhor iluminação ou mais perto');
+      return;
+    }
+
+    const parsed = parseATCUD(rawValue);
+    openConfirm(parsed);
+
+  } catch(e) {
+    overlay.classList.remove('active');
+    showToast('Erro: ' + e.message);
+    console.error(e);
+  }
+}
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+async function tryJsQR(ctx, w, h) {
+  // Lazy-load jsQR
+  if (!window.jsQR) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js';
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const code = jsQR(imageData.data, w, h, { inversionAttempts: 'dontInvert' });
+  return code ? code.data : null;
+}
+
+function parseATCUD(raw) {
+  // Format: A:NIF*B:NIF*C:PT*D:FT*E:N*F:YYYYMMDD*G:FT X/N*H:ATCUD*...*N:IVA*O:TOTAL*P:HASH
+  const fields = {};
+  raw.split('*').forEach(part => {
+    const idx = part.indexOf(':');
+    if (idx > 0) {
+      const key = part.substring(0, idx).trim();
+      const val = part.substring(idx + 1).trim();
+      fields[key] = val;
+    }
+  });
+
+  // Parse date YYYYMMDD → YYYY-MM-DD
+  let data = '';
+  if (fields['F'] && fields['F'].length === 8) {
+    data = fields['F'].substring(0,4) + '-' + fields['F'].substring(4,6) + '-' + fields['F'].substring(6,8);
+  }
+
+  return {
+    nif:   fields['A'] || '',
+    data:  data,
+    doc:   fields['G'] || '',
+    atcud: fields['H'] || '',
+    total: parseFloat(fields['O']) || 0,
+    iva:   parseFloat(fields['N']) || 0,
+    tipo:  fields['D'] || '',
+    raw:   raw
+  };
+}
+// ── CONFIRM DIALOG ──
+function openConfirm(data) {
+  document.getElementById('fData').value = data.data || '';
+  document.getElementById('fTotal').value = data.total || '';
+  document.getElementById('fIva').value = data.iva || '';
+  document.getElementById('fDoc').value = data.doc || '';
+  document.getElementById('fNif').value = data.nif || '';
+  document.getElementById('fAtcud').value = data.atcud || '';
+
+  // Auto-detect category from NIF cache
+  const nif = data.nif || '';
+  let cat = 'geral';
+  if (nifCache[nif]) {
+    cat = nifCache[nif].categoria;
+    if (cat !== 'cartao') {
+      document.getElementById('fDesig').value = nifCache[nif].designacao || 'Alimentação';
+    }
+  }
+  setCategoria(cat);
+
+  document.getElementById('confirmDialog').classList.add('active');
+}
+
+function closeConfirm() {
+  document.getElementById('confirmDialog').classList.remove('active');
+}
+
+function setCategoria(cat) {
+  currentCategoria = cat;
+  document.getElementById('btnGeral').className  = 'cat-btn' + (cat === 'geral'        ? ' active-geral' : '');
+  document.getElementById('btnComb').className   = 'cat-btn' + (cat === 'combustivel'  ? ' active-comb'  : '');
+  document.getElementById('btnCartao').className = 'cat-btn' + (cat === 'cartao'       ? ' active-cartao': '');
+
+  const sel = document.getElementById('fDesig');
+  const selRow = document.getElementById('desigRow');
+
+  if (cat === 'combustivel') {
+    sel.innerHTML = '<option value="Combustível">Combustível</option>';
+    sel.disabled = true;
+    selRow.style.display = '';
+  } else if (cat === 'cartao') {
+    // Cartão empresa não precisa de designação
+    selRow.style.display = 'none';
+  } else {
+    sel.disabled = false;
+    selRow.style.display = '';
+    sel.innerHTML = [
+      'Alimentação','Alojamento','Deslocação Sócio','Oferta Clientes',
+      'Fardamento','Material Informático','Material de Escritório','Portagens','Outro'
+    ].map(d => `<option value="${d}">${d}</option>`).join('');
+  }
+}
+
+function saveInvoice() {
+  const nif = document.getElementById('fNif').value.trim();
+  const desig = document.getElementById('fDesig').value;
+
+  const invoice = {
+    id: Date.now(),
+    data: document.getElementById('fData').value,
+    total: parseFloat(document.getElementById('fTotal').value) || 0,
+    iva: parseFloat(document.getElementById('fIva').value) || 0,
+    doc: document.getElementById('fDoc').value.trim(),
+    nif,
+    atcud: document.getElementById('fAtcud').value.trim(),
+    categoria: currentCategoria,
+    designacao: currentCategoria === 'cartao' ? 'Cartão Empresa' : desig
+  };
+
+  // Update NIF cache
+  if (nif) {
+    nifCache[nif] = {
+      categoria: currentCategoria,
+      designacao: currentCategoria === 'cartao' ? 'Cartão Empresa' : desig
+    };
+    localStorage.setItem(NIF_CACHE_KEY, JSON.stringify(nifCache));
+  }
+
+  invoices.push(invoice);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(invoices));
+  closeConfirm();
+  renderList();
+  showToast('Fatura guardada ✓');
+}
+
+// ── NIF CACHE BACKUP ──
+function exportNifCache() {
+  if (!Object.keys(nifCache).length) {
+    showToast('Sem NIFs guardados ainda');
+    return;
+  }
+  const json = JSON.stringify(nifCache, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const now = new Date();
+  a.download = `nif_cache_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`${Object.keys(nifCache).length} NIFs exportados ✓`);
+}
+
+function importNifCache(input) {
+  if (!input.files || !input.files[0]) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const imported = JSON.parse(e.target.result);
+      // Merge com cache existente (imported prevalece em conflito)
+      const merged = { ...nifCache, ...imported };
+      nifCache = merged;
+      localStorage.setItem(NIF_CACHE_KEY, JSON.stringify(nifCache));
+      showToast(`${Object.keys(imported).length} NIFs carregados ✓`);
+    } catch {
+      showToast('Ficheiro inválido');
+    }
+    input.value = '';
+  };
+  reader.readAsText(input.files[0]);
+}
+
+// ── RENDER LIST ──
+function renderList() {
+  const list = document.getElementById('invoiceList');
+  const count = document.getElementById('countBadge');
+  count.textContent = invoices.length + (invoices.length === 1 ? ' fatura' : ' faturas');
+
+  if (!invoices.length) {
+    list.innerHTML = `<div class="empty-state"><span class="icon">◎</span>Nenhuma fatura ainda.<br>Aponte a câmara ao QR code da fatura.</div>`;
+    return;
+  }
+
+  list.innerHTML = [...invoices].reverse().map(inv => `
+    <div class="invoice-card">
+      <div class="card-dot ${inv.categoria === 'combustivel' ? 'dot-comb' : inv.categoria === 'cartao' ? 'dot-cartao' : 'dot-geral'}"></div>
+      <div class="card-body">
+        <div class="card-top">
+          <span class="card-desig">${inv.categoria === 'cartao' ? '💳 Cartão Empresa' : inv.designacao}</span>
+          <span class="card-total">${inv.total.toFixed(2)}€</span>
+        </div>
+        <div class="card-meta">${inv.data || '—'} · ${inv.doc || '—'} · NIF ${inv.nif || '—'}</div>
+      </div>
+      <button class="btn-delete" onclick="deleteInvoice(${inv.id})">✕</button>
+    </div>
+  `).join('');
+}
+
+function deleteInvoice(id) {
+  invoices = invoices.filter(i => i.id !== id);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(invoices));
+  renderList();
+}
+
+// ── EXPORT ──
+const MONTHS_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+function updateMonthLabel() {
+  const now = new Date();
+  document.getElementById('monthLabel').textContent = MONTHS_PT[now.getMonth()] + ' ' + now.getFullYear();
+}
+
+function exportCartaoCSV() {
+  const data = invoices.filter(i => i.categoria === 'cartao');
+  if (!data.length) { showToast('Sem despesas de cartão empresa'); return; }
+
+  const now = new Date();
+  const mesAno = MONTHS_PT[now.getMonth()] + '_' + now.getFullYear();
+
+  const lines = [
+    'Data,Total,IVA,Total s/IVA,NIF,Nº Documento,ATCUD'
+  ];
+  data.forEach(inv => {
+    const semIva = (inv.total - inv.iva).toFixed(2);
+    lines.push([
+      inv.data,
+      inv.total.toFixed(2),
+      inv.iva.toFixed(2),
+      semIva,
+      inv.nif,
+      '"' + (inv.doc || '') + '"',
+      inv.atcud || ''
+    ].join(','));
+  });
+  // Totals row
+  const totalGeral = data.reduce((s,i) => s + i.total, 0).toFixed(2);
+  const totalIva   = data.reduce((s,i) => s + i.iva,   0).toFixed(2);
+  const totalSem   = (data.reduce((s,i) => s + i.total, 0) - data.reduce((s,i) => s + i.iva, 0)).toFixed(2);
+  lines.push(['TOTAL', totalGeral, totalIva, totalSem, '', '', ''].join(','));
+
+  const csv = lines.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Cartao_Empresa_${mesAno}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('CSV exportado ✓');
+}
+
+function exportExcel(categoria) {
+  const data = invoices.filter(i => i.categoria === categoria);
+  if (!data.length) { showToast('Sem faturas nesta categoria'); return; }
+
+  const now = new Date();
+  const mesAno = MONTHS_PT[now.getMonth()] + ' ' + now.getFullYear();
+  const isCombus = categoria === 'combustivel';
+
+  const wb = XLSX.utils.book_new();
+  const ws_data = [];
+
+  if (isCombus) {
+    ws_data.push(['Matrícula: 07-MH-76']);
+    ws_data.push([]);
+    ws_data.push(['Data', 'Designação', 'Nº Documento', 'NIF', 'Total c/IVA', 'IVA', 'Total s/IVA']);
+    data.forEach(inv => {
+      ws_data.push([inv.data, inv.designacao, inv.doc, inv.nif, inv.total, inv.iva, +(inv.total - inv.iva).toFixed(2)]);
+    });
+    ws_data.push([]);
+    ws_data.push(['', '', '', 'Total', data.reduce((s,i) => s + i.total, 0).toFixed(2)]);
+  } else {
+    ws_data.push(['Data', 'Designação', 'Nº Documento', 'NIF', 'Total c/IVA', 'IVA', 'Total s/IVA']);
+    data.forEach(inv => {
+      ws_data.push([inv.data, inv.designacao, inv.doc, inv.nif, inv.total, inv.iva, +(inv.total - inv.iva).toFixed(2)]);
+    });
+    ws_data.push([]);
+    ws_data.push(['', '', '', 'Total', data.reduce((s,i) => s + i.total, 0).toFixed(2)]);
+  }
+
+  const ws = XLSX.utils.aoa_to_sheet(ws_data);
+  ws['!cols'] = [14,20,18,14,14,10,14].map(w => ({ wch: w }));
+  XLSX.utils.book_append_sheet(wb, ws, mesAno);
+
+  const filename = `${isCombus ? 'Combustivel' : 'Despesas'}_${mesAno.replace(' ', '_')}.xlsx`;
+  XLSX.writeFile(wb, filename);
+  showToast('Excel exportado ✓');
+}
+
+// ── TOAST ──
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+</script>
+</body>
+</html>
